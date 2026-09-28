@@ -4,13 +4,14 @@ import Header from './components/Header';
 import ChatArea from './components/ChatArea';
 import ChatInput from './components/ChatInput';
 import ProfileView from './components/ProfileView';
+import PlacementIntelligenceView from './components/PlacementIntelligenceView';
 import { useChat } from './hooks/useChat';
 import { useProfile } from './hooks/useProfile';
 
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [inputValue, setInputValue] = useState('');
-  const [activeTab, setActiveTab] = useState('chat'); // 'chat' | 'profile'
+  const [activeTab, setActiveTab] = useState('chat'); // 'chat' | 'profile' | 'placement'
 
   const {
     profile,
@@ -70,7 +71,7 @@ export default function App() {
           setActiveTab={setActiveTab}
         />
 
-        {activeTab === 'chat' ? (
+        {activeTab === 'chat' && (
           <>
             <ChatArea
               messages={messages}
@@ -87,7 +88,9 @@ export default function App() {
               isLoading={isChatLoading}
             />
           </>
-        ) : (
+        )}
+
+        {activeTab === 'profile' && (
           <ProfileView
             profile={profile}
             activeUserId={activeUserId}
@@ -96,6 +99,15 @@ export default function App() {
             error={profileError}
             successMessage={profileSuccess}
             onBackToChat={() => setActiveTab('chat')}
+          />
+        )}
+
+        {activeTab === 'placement' && (
+          <PlacementIntelligenceView
+            activeUserId={activeUserId}
+            activeProfile={profile}
+            onStartChatWithPrompt={handleSelectPrompt}
+            onNavigateToProfile={() => setActiveTab('profile')}
           />
         )}
       </main>

@@ -40,7 +40,8 @@ export class AgentService {
       '2. Use "save_memory" ONLY when the candidate shares a durable, important fact (e.g. career goals, recurring weaknesses, established study habits). ' +
       '3. NEVER save casual greetings, one-off questions, or conversational filler as memory. ' +
       '4. Use "delete_memory" if the user explicitly asks to forget or remove a remembered fact. ' +
-      '5. If the request is a general question, conceptual explanation, or greeting, answer directly without invoking tools.';
+      '5. Placement Intelligence: When the user asks about role readiness, skill gaps, or preparation priorities ("Am I ready for Data Analyst?", "What skills am I missing?", "What should I focus on first?"), invoke "analyze_placement_readiness" or "get_skill_gap_analysis". When asked about the required skills for a role ("What skills are required for Data Scientist?"), call "get_role_requirements". ' +
+      '6. If the request is a general question, conceptual explanation, or greeting, answer directly without invoking tools.';
 
     if (userId) {
       systemPrompt += `\n\nActive Candidate Context:\nThe current candidate's userId is "${userId}". Always pass this userId when calling candidate tools.`;
@@ -131,6 +132,8 @@ export class AgentService {
             'update_user_progress',
             'get_relevant_memories',
             'save_memory',
+            'analyze_placement_readiness',
+            'get_skill_gap_analysis',
           ];
           if (userId && !toolArgs.userId && userIdTools.includes(toolName)) {
             toolArgs.userId = userId;

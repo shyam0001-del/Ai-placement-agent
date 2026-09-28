@@ -4,11 +4,12 @@ import app from '../src/app.js';
 import { aiService } from '../src/services/ai/ai.service.js';
 import { userService, formatProfileContext } from '../src/services/user/user.service.js';
 import { memoryService } from '../src/services/memory/memory.service.js';
+import { placementIntelligenceService, READINESS_LEVELS } from '../src/services/placement/placementIntelligence.service.js';
 import { toolRegistry } from '../src/services/tools/index.js';
 import { agentService } from '../src/services/agent/agent.service.js';
 import { getDatabaseStatus } from '../src/config/db.js';
 
-describe('AI Placement Agent - Full API & Agent Test Suite (Phase 1 + 2 + 3 + 4)', () => {
+describe('AI Placement Agent - Full API & Agent Test Suite (Phase 1 + 2 + 3 + 4 + 5)', () => {
   let server;
   const TEST_PORT = 5096;
   let testUserId = '';
@@ -1088,5 +1089,388 @@ describe('AI Placement Agent - Full API & Agent Test Suite (Phase 1 + 2 + 3 + 4)
     const verifyData = await verifyGet.json();
     assert.strictEqual(verifyData.data.some((m) => m.id === createdId), false);
   });
+
+  // ==========================================
+  // PHASE 5 TESTS: PLACEMENT INTELLIGENCE ENGINE
+  // ==========================================
+
+  // 1. Role catalog retrieval
+  it('Phase 5.1: Role catalog retrieval returns valid structured roles', () => {
+    const roles = placementIntelligenceService.getAvailableRoles();
+    assert.ok(Array.isArray(roles));
+    assert.ok(roles.length >= 8);
+    const analyst = roles.find((r) => r.title === 'Data Analyst');
+    assert.ok(analyst);
+    assert.strictEqual(analyst.category, 'Analytics');
+    assert.ok(analyst.requiredSkillCount >= 5);
+  });
+
+  // 2. Unknown role handling
+  it('Phase 5.2: Unknown role handling throws descriptive error', () => {
+    assert.throws(
+      () => {
+        placementIntelligenceService.getRoleRequirements('Quantum Blockchain Wizard');
+      },
+      (err) => {
+        assert.ok(err.message.includes('not found in catalog'));
+        return true;
+      }
+    );
+  });
+
+  // 3. Skill normalization
+  it('Phase 5.3: Skill normalization handles casing, punctuation, and whitespace', () => {
+    assert.strictEqual(placementIntelligenceService.normalizeSkill('  JavaScript  '), 'javascript');
+    assert.strictEqual(placementIntelligenceService.normalizeSkill('React.js'), 'react');
+    assert.strictEqual(placementIntelligenceService.normalizeSkill('SQL'), 'sql');
+    assert.strictEqual(placementIntelligenceService.normalizeSkill('PowerBI'), 'power bi');
+  });
+
+  // 4. Alias normalization
+  it('Phase 5.4: Alias normalization maps synonyms to canonical skills', () => {
+    assert.strictEqual(placementIntelligenceService.normalizeSkill('dsa'), 'data structures & algorithms');
+    assert.strictEqual(placementIntelligenceService.normalizeSkill('ml'), 'machine learning');
+    assert.strictEqual(placementIntelligenceService.normalizeSkill('stats'), 'statistics & probability');
+    assert.strictEqual(placementIntelligenceService.normalizeSkill('postgres'), 'sql');
+  });
+
+  // 5. Candidate skill matching
+  it('Phase 5.5: Candidate skill matching identifies verified competencies', () => {
+    const requirements = placementIntelligenceService.getRoleRequirements('Backend Developer');
+    const candidate = {
+      skills: [
+        { name: 'Node.js / Express', level: 'advanced' },
+        { name: 'SQL', level: 'advanced' },
+      ],
+      progress: [],
+      weakAreas: [],
+    };
+
+    const comparison = placementIntelligenceService.compareCandidateSkills(candidate, requirements);
+    assert.ok(comparison.strengths.some((s) => s.skill.includes('Node')));
+    assert.ok(comparison.strengths.some((s) => s.skill === 'SQL'));
+  });
+
+  // 6. Missing skill detection
+  it('Phase 5.6: Missing skill detection classifies absent requirements as gaps', () => {
+    const requirements = placementIntelligenceService.getRoleRequirements('Data Analyst');
+    const candidate = {
+      skills: [{ name: 'Python', level: 'intermediate' }],
+      progress: [],
+      weakAreas: [],
+    };
+
+    const comparison = placementIntelligenceService.compareCandidateSkills(candidate, requirements);
+    const missingSql = comparison.gaps.find((g) => g.skill === 'SQL');
+    assert.ok(missingSql);
+    assert.strictEqual(missingSql.status, 'gap');
+    assert.strictEqual(missingSql.importance, 'high');
+  });
+
+  // 7. Proficiency-aware matching
+  it('Phase 5.7: Proficiency-aware matching differentiates beginner vs target proficiency', () => {
+    const requirements = placementIntelligenceService.getRoleRequirements('Data Analyst');
+    // SQL requires advanced
+    const candidate = {
+      skills: [{ name: 'SQL', level: 'beginner' }],
+      progress: [],
+      weakAreas: [],
+    };
+
+    const comparison = placementIntelligenceService.compareCandidateSkills(candidate, requirements);
+    const sqlDeveloping = comparison.developing.find((d) => d.skill === 'SQL');
+    assert.ok(sqlDeveloping);
+    assert.strictEqual(sqlDeveloping.status, 'developing');
+    assert.strictEqual(sqlDeveloping.currentLevel, 'beginner');
+  });
+
+  // 8. Skill gap calculation
+  it('Phase 5.8: Skill gap calculation outputs structured gap objects with explanations', () => {
+    const requirements = placementIntelligenceService.getRoleRequirements('Backend Developer');
+    const candidate = {
+      skills: [{ name: 'JavaScript', level: 'intermediate' }],
+      weakAreas: ['System Design'],
+      progress: [],
+    };
+
+    const comparison = placementIntelligenceService.compareCandidateSkills(candidate, requirements);
+    const allGaps = [...comparison.gaps, ...comparison.developing];
+    assert.ok(allGaps.length >= 4);
+    const dockerGap = allGaps.find((g) => g.skill.includes('Docker'));
+    assert.ok(dockerGap);
+    assert.ok(dockerGap.reason.includes('Required for Backend Developer'));
+  });
+
+  // 9. Priority ordering
+  it('Phase 5.9: Priority ordering ranks high importance and missing gaps at top', () => {
+    const requirements = placementIntelligenceService.getRoleRequirements('Data Analyst');
+    const candidate = {
+      skills: [
+        { name: 'Python', level: 'intermediate' },
+        { name: 'Power BI', level: 'intermediate' },
+      ],
+      weakAreas: ['SQL'],
+      progress: [],
+    };
+
+    const comparison = placementIntelligenceService.compareCandidateSkills(candidate, requirements);
+    const priorities = placementIntelligenceService.prioritizeSkillGaps([...comparison.gaps, ...comparison.developing]);
+    assert.strictEqual(priorities[0].priority, 1);
+    // SQL or Statistics should be #1 or #2
+    const topTwo = [priorities[0].skill, priorities[1].skill];
+    assert.ok(topTwo.includes('SQL') || topTwo.includes('Statistics & Probability'));
+  });
+
+  // 10. Readiness calculation
+  it('Phase 5.10: Readiness calculation assigns explainable score and level categories', () => {
+    const requirements = placementIntelligenceService.getRoleRequirements('Data Scientist');
+    const weakCandidate = { skills: [], progress: [], leetcodeSolved: 0 };
+    const weakComp = placementIntelligenceService.compareCandidateSkills(weakCandidate, requirements);
+    const weakReadiness = placementIntelligenceService.calculateReadiness(weakCandidate, requirements, weakComp);
+    assert.strictEqual(weakReadiness.level, READINESS_LEVELS.EARLY);
+    assert.ok(weakReadiness.score <= 0.35);
+
+    const strongCandidate = {
+      skills: requirements.skills.map((s) => ({ name: s.name, level: 'advanced' })),
+      progress: [{ topic: 'Machine Learning', status: 'completed' }],
+      leetcodeSolved: 250,
+    };
+    const strongComp = placementIntelligenceService.compareCandidateSkills(strongCandidate, requirements);
+    const strongReadiness = placementIntelligenceService.calculateReadiness(strongCandidate, requirements, strongComp);
+    assert.strictEqual(strongReadiness.level, READINESS_LEVELS.PLACEMENT_READY);
+    assert.ok(strongReadiness.score >= 0.80);
+  });
+
+  // 11. get_role_requirements tool
+  it('Phase 5.11: get_role_requirements tool executes and returns catalog skills', async () => {
+    const result = await toolRegistry.executeTool('get_role_requirements', {
+      role: 'Data Analyst',
+    });
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.data.role, 'Data Analyst');
+    assert.ok(Array.isArray(result.data.requiredSkills));
+    assert.ok(result.data.requiredSkills.some((s) => s.name === 'SQL'));
+  });
+
+  // 12. analyze_placement_readiness tool
+  it('Phase 5.12: analyze_placement_readiness tool evaluates candidate profile against target role', async () => {
+    const result = await toolRegistry.executeTool('analyze_placement_readiness', {
+      userId: testUserId,
+      role: 'Backend Developer',
+    });
+
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.data.targetRole, 'Backend Developer');
+    assert.ok(result.data.readiness.level);
+    assert.ok(Array.isArray(result.data.priorityGaps));
+    assert.ok(Array.isArray(result.data.recommendations));
+  });
+
+  // 13. get_skill_gap_analysis tool
+  it('Phase 5.13: get_skill_gap_analysis tool identifies actionable missing competencies', async () => {
+    const result = await toolRegistry.executeTool('get_skill_gap_analysis', {
+      userId: testUserId,
+      role: 'Frontend Developer',
+    });
+
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.data.targetRole, 'Frontend Developer');
+    assert.ok(result.data.totalGapsCount >= 3);
+    assert.ok(result.data.skillGaps.some((g) => g.skill === 'React' || g.skill === 'JavaScript'));
+  });
+
+  // 14. User isolation
+  it('Phase 5.14: User isolation ensures candidate A analysis does not bleed into candidate B', async () => {
+    const userA = await userService.createUser({
+      name: 'Candidate A',
+      email: 'candA@test.com',
+      skills: [{ name: 'Python', level: 'advanced' }, { name: 'SQL', level: 'advanced' }],
+      targetRole: 'Data Analyst',
+    });
+
+    const userB = await userService.createUser({
+      name: 'Candidate B',
+      email: 'candB@test.com',
+      skills: [{ name: 'HTML & CSS', level: 'beginner' }],
+      targetRole: 'Data Analyst',
+    });
+
+    const analysisA = await placementIntelligenceService.generatePlacementAnalysis({ userId: userA.id });
+    const analysisB = await placementIntelligenceService.generatePlacementAnalysis({ userId: userB.id });
+
+    assert.ok(analysisA.readiness.score > analysisB.readiness.score);
+    assert.strictEqual(analysisA.strengths.some((s) => s.skill === 'SQL'), true);
+    assert.strictEqual(analysisB.strengths.some((s) => s.skill === 'SQL'), false);
+  });
+
+  // 15. Invalid user ID
+  it('Phase 5.15: Invalid user ID returns validation error', async () => {
+    await assert.rejects(
+      async () => {
+        await placementIntelligenceService.generatePlacementAnalysis({ userId: 'nonexistent-user-id-xyz' });
+      },
+      (err) => {
+        assert.ok(err.message.includes('not found') || err.message.includes('invalid'));
+        return true;
+      }
+    );
+  });
+
+  // 16. Invalid role
+  it('Phase 5.16: Invalid role returns descriptive error', async () => {
+    await assert.rejects(
+      async () => {
+        await placementIntelligenceService.generatePlacementAnalysis({
+          userId: testUserId,
+          role: 'Imaginary Job Position 9000',
+        });
+      },
+      (err) => {
+        assert.ok(err.message.includes('not found in catalog'));
+        return true;
+      }
+    );
+  });
+
+  // 17. Empty candidate skills
+  it('Phase 5.17: Empty candidate skills handled gracefully without crash', async () => {
+    const emptyUser = await userService.createUser({
+      name: 'Blank Candidate',
+      email: 'blank@test.com',
+      skills: [],
+      targetRole: 'Software Engineer',
+    });
+
+    const analysis = await placementIntelligenceService.generatePlacementAnalysis({ userId: emptyUser.id });
+    assert.strictEqual(analysis.strengths.length, 0);
+    assert.ok(analysis.skillGaps.length >= 5);
+    assert.strictEqual(analysis.readiness.level, READINESS_LEVELS.EARLY);
+  });
+
+  // 18. Progress integration
+  it('Phase 5.18: Progress integration rewards completed preparation topics in readiness score', async () => {
+    const baseCandidate = {
+      skills: [{ name: 'Python', level: 'intermediate' }],
+      progress: [],
+      leetcodeSolved: 0,
+    };
+    const requirements = placementIntelligenceService.getRoleRequirements('Data Analyst');
+    const comp1 = placementIntelligenceService.compareCandidateSkills(baseCandidate, requirements);
+    const r1 = placementIntelligenceService.calculateReadiness(baseCandidate, requirements, comp1);
+
+    const progressCandidate = {
+      ...baseCandidate,
+      progress: [
+        { topic: 'SQL', status: 'completed' },
+        { topic: 'Excel', status: 'completed' },
+      ],
+    };
+    const comp2 = placementIntelligenceService.compareCandidateSkills(progressCandidate, requirements);
+    const r2 = placementIntelligenceService.calculateReadiness(progressCandidate, requirements, comp2);
+
+    assert.ok(r2.score > r1.score);
+    assert.ok(r2.breakdown.progressBonus > 0);
+  });
+
+  // 19. Memory integration where applicable
+  it('Phase 5.19: Memory integration incorporates long-term stored weaknesses into analysis', async () => {
+    const memUser = await userService.createUser({
+      name: 'Memory Candidate',
+      email: 'memcand@test.com',
+      skills: [{ name: 'SQL', level: 'advanced' }],
+      targetRole: 'Data Analyst',
+    });
+
+    // Stored persistent weakness in memory
+    await memoryService.createOrUpdateMemory({
+      userId: memUser.id,
+      type: 'weakness',
+      key: 'SQL',
+      value: 'Struggles with recursive CTEs and performance tuning',
+      confidence: 0.9,
+      importance: 0.9,
+    });
+
+    const analysis = await placementIntelligenceService.generatePlacementAnalysis({ userId: memUser.id });
+    // SQL should be flagged as developing because of persistent memory weakness
+    const sqlItem = analysis.skillGaps.find((g) => g.skill === 'SQL');
+    assert.ok(sqlItem);
+    assert.strictEqual(sqlItem.status, 'developing');
+  });
+
+  // 20. REST endpoint behavior
+  it('Phase 5.20: REST endpoints (GET /api/placement/roles, /roles/:role, /users/:userId/placement-analysis) function correctly', async () => {
+    // GET /api/placement/roles
+    const rolesRes = await fetch(`http://localhost:${TEST_PORT}/api/placement/roles`);
+    assert.strictEqual(rolesRes.status, 200);
+    const rolesData = await rolesRes.json();
+    assert.strictEqual(rolesData.success, true);
+    assert.ok(rolesData.data.length >= 8);
+
+    // GET /api/placement/roles/:role
+    const roleRes = await fetch(`http://localhost:${TEST_PORT}/api/placement/roles/Data%20Analyst`);
+    assert.strictEqual(roleRes.status, 200);
+    const roleData = await roleRes.json();
+    assert.strictEqual(roleData.success, true);
+    assert.strictEqual(roleData.data.title, 'Data Analyst');
+
+    // GET /api/users/:userId/placement-analysis
+    const analysisRes = await fetch(`http://localhost:${TEST_PORT}/api/users/${testUserId}/placement-analysis`);
+    assert.strictEqual(analysisRes.status, 200);
+    const analysisData = await analysisRes.json();
+    assert.strictEqual(analysisData.success, true);
+    assert.ok(analysisData.data.readiness);
+    assert.ok(Array.isArray(analysisData.data.skillGaps));
+  });
+
+  // 21. Agent integration with analyze_placement_readiness
+  it('Phase 5.21: Agent tool calling for placement readiness query calls analyze_placement_readiness', async () => {
+    const originalGenerate = aiService.generateChatResponse;
+
+    let step = 0;
+    aiService.generateChatResponse = async () => {
+      step++;
+      if (step === 1) {
+        return {
+          message: '',
+          rawMessage: { role: 'assistant', content: null },
+          toolCalls: [
+            {
+              id: 'call_readiness_1',
+              type: 'function',
+              function: {
+                name: 'analyze_placement_readiness',
+                arguments: JSON.stringify({ userId: testUserId, role: 'Data Analyst' }),
+              },
+            },
+          ],
+          model: 'test-model',
+          usage: null,
+        };
+      }
+      return {
+        message: 'Your placement readiness for Data Analyst is currently Developing. Your top priority gaps are SQL and Statistics.',
+        rawMessage: { role: 'assistant', content: 'Your placement readiness for Data Analyst is currently Developing.' },
+        toolCalls: [],
+        model: 'test-model',
+        usage: null,
+      };
+    };
+
+    try {
+      const result = await agentService.run({
+        message: 'Am I ready for a Data Analyst role?',
+        userId: testUserId,
+      });
+
+      assert.strictEqual(result.toolCalls.length, 1);
+      assert.strictEqual(result.toolCalls[0].name, 'analyze_placement_readiness');
+      assert.strictEqual(result.toolCalls[0].status, 'success');
+      assert.ok(result.message.includes('Developing'));
+    } finally {
+      aiService.generateChatResponse = originalGenerate;
+    }
+  });
 });
+
 

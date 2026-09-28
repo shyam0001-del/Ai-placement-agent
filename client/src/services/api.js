@@ -214,3 +214,61 @@ export async function deleteUserMemory(memoryId) {
   return data.data;
 }
 
+/**
+ * ========================================================
+ * Placement Intelligence API Methods (Phase 5)
+ * ========================================================
+ */
+
+/**
+ * Fetch available placement roles from catalog
+ */
+export async function fetchPlacementRoles() {
+  const response = await fetch(`${API_BASE}/placement/roles`);
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.success) {
+    const err = new Error(data?.error?.message || 'Failed to fetch placement roles');
+    err.code = data?.error?.code || 'ROLES_FETCH_ERROR';
+    throw err;
+  }
+  return data.data || [];
+}
+
+/**
+ * Fetch role requirements for a specific target role
+ * @param {string} role
+ */
+export async function fetchRoleRequirements(role) {
+  if (!role) return null;
+  const response = await fetch(`${API_BASE}/placement/roles/${encodeURIComponent(role)}`);
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.success) {
+    const err = new Error(data?.error?.message || 'Failed to fetch role requirements');
+    err.code = data?.error?.code || 'ROLE_REQUIREMENTS_ERROR';
+    throw err;
+  }
+  return data.data;
+}
+
+/**
+ * Fetch deterministic placement intelligence analysis for active user
+ * @param {string} userId
+ * @param {string} [role]
+ */
+export async function fetchPlacementAnalysis(userId, role = null) {
+  if (!userId) return null;
+  const url = role
+    ? `${API_BASE}/users/${encodeURIComponent(userId)}/placement-analysis?role=${encodeURIComponent(role)}`
+    : `${API_BASE}/users/${encodeURIComponent(userId)}/placement-analysis`;
+
+  const response = await fetch(url);
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.success) {
+    const err = new Error(data?.error?.message || 'Failed to fetch placement analysis');
+    err.code = data?.error?.code || 'PLACEMENT_ANALYSIS_ERROR';
+    throw err;
+  }
+  return data.data;
+}
+
+

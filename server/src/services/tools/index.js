@@ -5,6 +5,9 @@ import { getRelevantMemoriesTool } from './getRelevantMemories.tool.js';
 import { saveMemoryTool } from './saveMemory.tool.js';
 import { updateMemoryTool } from './updateMemory.tool.js';
 import { deleteMemoryTool } from './deleteMemory.tool.js';
+import { getRoleRequirementsTool } from './getRoleRequirements.tool.js';
+import { analyzePlacementReadinessTool } from './analyzePlacementReadiness.tool.js';
+import { getSkillGapAnalysisTool } from './getSkillGapAnalysis.tool.js';
 
 class ToolRegistry {
   constructor() {
@@ -16,6 +19,9 @@ class ToolRegistry {
     this.register(saveMemoryTool);
     this.register(updateMemoryTool);
     this.register(deleteMemoryTool);
+    this.register(getRoleRequirementsTool);
+    this.register(analyzePlacementReadinessTool);
+    this.register(getSkillGapAnalysisTool);
   }
 
   /**

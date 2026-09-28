@@ -6,6 +6,7 @@ import {
   User,
   Database,
   Cpu,
+  Compass,
 } from 'lucide-react';
 
 export default function Sidebar({
@@ -44,9 +45,10 @@ export default function Sidebar({
 
   const upcomingPhases = [
     { name: 'Phase 1: Basic AI Chat', status: 'completed', desc: 'Core chat engine' },
-    { name: 'Phase 2: User Profile', status: 'active', desc: 'MongoDB candidate context' },
-    { name: 'Phase 3: Tool Calling', status: 'upcoming', desc: 'Agentic Tools' },
-    { name: 'Phase 4: Structured Memory', status: 'upcoming', desc: 'Long-term Tracking' },
+    { name: 'Phase 2: User Profile', status: 'completed', desc: 'MongoDB candidate context' },
+    { name: 'Phase 3: Tool Calling', status: 'completed', desc: 'Agentic Tools' },
+    { name: 'Phase 4: Structured Memory', status: 'completed', desc: 'Long-term Tracking' },
+    { name: 'Phase 5: Placement Engine', status: 'active', desc: 'Readiness & Skill Gaps' },
   ];
 
   const isDbConnected = serverStatus?.database?.connected;
@@ -98,6 +100,24 @@ export default function Sidebar({
           >
             <MessageSquare className="w-4 h-4 text-cyan-400" />
             <span>AI Placement Chat</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setActiveTab('placement');
+              if (window.innerWidth < 768) setSidebarOpen(false);
+            }}
+            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition cursor-pointer ${
+              activeTab === 'placement'
+                ? 'bg-slate-800 text-cyan-300 border border-slate-700/80'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-850'
+            }`}
+          >
+            <Compass className="w-4 h-4 text-cyan-400" />
+            <span>Placement Intelligence</span>
+            <span className="ml-auto text-[9px] font-mono px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+              NEW
+            </span>
           </button>
 
           <button
