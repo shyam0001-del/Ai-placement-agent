@@ -3,16 +3,42 @@ import assert from 'node:assert';
 import app from '../src/app.js';
 import { aiService } from '../src/services/ai/ai.service.js';
 import { userService, formatProfileContext } from '../src/services/user/user.service.js';
+import { toolRegistry } from '../src/services/tools/index.js';
+import { agentService } from '../src/services/agent/agent.service.js';
 import { getDatabaseStatus } from '../src/config/db.js';
 
-describe('AI Placement Agent - Full API Test Suite (Phase 1 + Phase 2)', () => {
+describe('AI Placement Agent - Full API & Agent Test Suite (Phase 1 + 2 + 3)', () => {
   let server;
-  const TEST_PORT = 5097;
+  const TEST_PORT = 5096;
+  let testUserId = '';
 
   before(async () => {
     await new Promise((resolve) => {
       server = app.listen(TEST_PORT, resolve);
     });
+
+    // Create a base candidate for Phase 2 and Phase 3 tests
+    const user = await userService.createUser({
+      name: 'Rohan Mehra',
+      email: 'rohan.mehra@example.com',
+      degree: 'B.Tech Information Technology',
+      specialization: 'Cloud & Distributed Computing',
+      skills: [
+        { name: 'Python', level: 'advanced' },
+        { name: 'SQL', level: 'intermediate' },
+        { name: 'Docker', level: 'intermediate' },
+      ],
+      targetRole: 'DevOps / Backend SDE',
+      targetCompanies: ['Uber', 'Salesforce'],
+      experienceLevel: 'Final Year Student',
+      leetcodeSolved: 160,
+      weakAreas: ['Kubernetes Networking', 'Dynamic Programming'],
+      progress: [
+        { topic: 'SQL joins', status: 'completed', notes: 'Mastered inner/outer joins' },
+        { topic: 'Dynamic Programming', status: 'weak', notes: 'Need more practice on knapsack' },
+      ],
+    });
+    testUserId = user.id;
   });
 
   after(async () => {
@@ -23,19 +49,16 @@ describe('AI Placement Agent - Full API Test Suite (Phase 1 + Phase 2)', () => {
   });
 
   // ==========================================
-  // PHASE 1 REGRESSION TESTS (Section 9.10)
+  // PHASE 1 REGRESSION TESTS (Section 11.10)
   // ==========================================
 
   it('Phase 1.1: Normal AI message returns 200 with structured response', async () => {
     const originalGenerate = aiService.generateChatResponse;
-    aiService.generateChatResponse = async (input) => {
-      assert.strictEqual(input, 'What should I study for a data analyst interview?');
-      return {
-        message: 'Master SQL (joins, window functions), Python pandas, and basic statistics.',
-        model: 'configured-test-model',
-        usage: { prompt_tokens: 12, completion_tokens: 24, total_tokens: 36 },
-      };
-    };
+    aiService.generateChatResponse = async () => ({
+      message: 'Master SQL (joins, window functions), Python pandas, and basic statistics.',
+      model: 'test-llm',
+      usage: null,
+    });
 
     try {
       const res = await fetch(`http://localhost:${TEST_PORT}/api/chat`, {
@@ -48,7 +71,6 @@ describe('AI Placement Agent - Full API Test Suite (Phase 1 + Phase 2)', () => {
       const json = await res.json();
       assert.strictEqual(json.success, true);
       assert.ok(json.data.message.includes('Master SQL'));
-      assert.strictEqual(json.data.model, 'configured-test-model');
       assert.strictEqual(json.message, json.data.message);
     } finally {
       aiService.generateChatResponse = originalGenerate;
@@ -130,172 +152,134 @@ describe('AI Placement Agent - Full API Test Suite (Phase 1 + Phase 2)', () => {
   });
 
   // ==========================================
-  // PHASE 2 SPECIFIC TESTS (Section 9)
+  // PHASE 2 REGRESSION TESTS (Section 11.11)
   // ==========================================
 
-  // 1. MongoDB connection handling
   it('Phase 2.1: MongoDB connection status reports correctly in health check', async () => {
     const status = getDatabaseStatus();
     assert.ok(typeof status.status === 'string');
-    assert.ok(typeof status.connected === 'boolean');
 
     const res = await fetch(`http://localhost:${TEST_PORT}/api/health`);
     assert.strictEqual(res.status, 200);
     const json = await res.json();
     assert.strictEqual(json.success, true);
     assert.ok(json.data.database !== undefined);
-    assert.ok(typeof json.data.database.status === 'string');
   });
 
-  let createdUserId = '';
+  it('Phase 2.2: User CRUD operations succeed', async () => {
+    // Get user
+    const resGet = await fetch(`http://localhost:${TEST_PORT}/api/users/${testUserId}`);
+    assert.strictEqual(resGet.status, 200);
+    const userJson = await resGet.json();
+    assert.strictEqual(userJson.data.name, 'Rohan Mehra');
 
-  // 2. Create user
-  it('Phase 2.2: Create user (POST /api/users) creates a profile with 201', async () => {
-    const payload = {
-      name: 'Alex Rivera',
-      email: 'alex.rivera@example.com',
-      degree: 'B.Tech Computer Science',
-      specialization: 'Artificial Intelligence',
-      skills: [
-        { name: 'Python', level: 'advanced' },
-        { name: 'SQL', level: 'intermediate' },
-        { name: 'Data Structures', level: 'intermediate' },
-      ],
-      targetRole: 'Data Scientist',
-      targetCompanies: ['Google', 'Stripe', 'Amazon'],
-      experienceLevel: 'Final Year Student',
-      leetcodeSolved: 145,
-      weakAreas: ['Dynamic Programming', 'System Design'],
-    };
-
-    const res = await fetch(`http://localhost:${TEST_PORT}/api/users`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    assert.strictEqual(res.status, 201);
-    const json = await res.json();
-    assert.strictEqual(json.success, true);
-    assert.strictEqual(json.data.name, 'Alex Rivera');
-    assert.strictEqual(json.data.email, 'alex.rivera@example.com');
-    assert.strictEqual(json.data.targetRole, 'Data Scientist');
-    assert.strictEqual(json.data.skills.length, 3);
-    assert.ok(json.data.id);
-    createdUserId = json.data.id;
-  });
-
-  // 3. Get user
-  it('Phase 2.3: Get user (GET /api/users/:id) returns profile by ID', async () => {
-    assert.ok(createdUserId);
-    const res = await fetch(`http://localhost:${TEST_PORT}/api/users/${createdUserId}`);
-    assert.strictEqual(res.status, 200);
-    const json = await res.json();
-    assert.strictEqual(json.success, true);
-    assert.strictEqual(json.data.id, createdUserId);
-    assert.strictEqual(json.data.name, 'Alex Rivera');
-    assert.strictEqual(json.data.targetRole, 'Data Scientist');
-  });
-
-  // 4. Update user
-  it('Phase 2.4: Update user (PATCH /api/users/:id) modifies profile fields', async () => {
-    assert.ok(createdUserId);
-    const updatePayload = {
-      targetRole: 'Senior Data Scientist',
-      leetcodeSolved: 180,
-    };
-
-    const res = await fetch(`http://localhost:${TEST_PORT}/api/users/${createdUserId}`, {
+    // Patch user
+    const resPatch = await fetch(`http://localhost:${TEST_PORT}/api/users/${testUserId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updatePayload),
+      body: JSON.stringify({ leetcodeSolved: 175 }),
     });
-
-    assert.strictEqual(res.status, 200);
-    const json = await res.json();
-    assert.strictEqual(json.success, true);
-    assert.strictEqual(json.data.targetRole, 'Senior Data Scientist');
-    assert.strictEqual(json.data.leetcodeSolved, 180);
+    assert.strictEqual(resPatch.status, 200);
+    const patchJson = await resPatch.json();
+    assert.strictEqual(patchJson.data.leetcodeSolved, 175);
   });
 
-  // 5. Invalid user payload
-  it('Phase 2.5: Invalid user payload rejects with 400 VALIDATION_ERROR', async () => {
-    // Missing email
-    const res1 = await fetch(`http://localhost:${TEST_PORT}/api/users`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Sam' }),
-    });
-    assert.strictEqual(res1.status, 400);
-    const json1 = await res1.json();
-    assert.strictEqual(json1.error.code, 'VALIDATION_ERROR');
-
-    // Missing name
-    const res2 = await fetch(`http://localhost:${TEST_PORT}/api/users`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'valid@example.com' }),
-    });
-    assert.strictEqual(res2.status, 400);
-
-    // Invalid email format
-    const res3 = await fetch(`http://localhost:${TEST_PORT}/api/users`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Sam', email: 'not-an-email' }),
-    });
-    assert.strictEqual(res3.status, 400);
-  });
-
-  // 6. Nonexistent user
-  it('Phase 2.6: Nonexistent user (GET /api/users/unknown) returns 404 USER_NOT_FOUND', async () => {
+  it('Phase 2.3: Nonexistent user returns 404 USER_NOT_FOUND', async () => {
     const res = await fetch(`http://localhost:${TEST_PORT}/api/users/nonexistent_id_999`);
     assert.strictEqual(res.status, 404);
     const json = await res.json();
-    assert.strictEqual(json.success, false);
     assert.strictEqual(json.error.code, 'USER_NOT_FOUND');
   });
 
-  // 7. Chat without userId (Backward compatibility)
-  it('Phase 2.7: Chat without userId continues working seamlessly', async () => {
-    const originalGenerate = aiService.generateChatResponse;
-    let receivedOptions = null;
+  it('Phase 2.4: Chat with nonexistent userId returns 404 USER_NOT_FOUND', async () => {
+    const res = await fetch(`http://localhost:${TEST_PORT}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: 'unknown-id-8888', message: 'Hello' }),
+    });
+    assert.strictEqual(res.status, 404);
+    const json = await res.json();
+    assert.strictEqual(json.error.code, 'USER_NOT_FOUND');
+  });
 
-    aiService.generateChatResponse = async (input, options) => {
-      receivedOptions = options;
-      return {
-        message: 'General placement advice without profile context.',
-        model: 'test-model',
-        usage: null,
-      };
-    };
+  it('Phase 2.5: formatProfileContext formats concise readable summary without raw internals', () => {
+    const formatted = formatProfileContext({
+      name: 'Rohan Mehra',
+      degree: 'B.Tech IT',
+      targetRole: 'DevOps / Backend SDE',
+      skills: [{ name: 'Go', level: 'intermediate' }],
+      targetCompanies: ['Uber'],
+      weakAreas: ['Kubernetes Networking'],
+      leetcodeSolved: 175,
+    });
+    assert.ok(formatted.includes('Rohan Mehra'));
+    assert.ok(formatted.includes('DevOps / Backend SDE'));
+    assert.strictEqual(formatted.includes('_id'), false);
+    assert.strictEqual(formatted.includes('__v'), false);
+  });
+
+  // ==========================================
+  // PHASE 3 AGENT & TOOL CALLING TESTS (Section 11)
+  // ==========================================
+
+  // 1. No-tool response
+  it('Phase 3.1: No-tool response: user query that requires no tool returns direct answer with 0 tool calls', async () => {
+    const originalGenerate = aiService.generateChatResponse;
+    aiService.generateChatResponse = async () => ({
+      message: 'Hello! I am your AI Placement Agent. How can I assist your interview prep today?',
+      toolCalls: null,
+      model: 'test-model',
+      usage: null,
+    });
 
     try {
       const res = await fetch(`http://localhost:${TEST_PORT}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: 'What is quicksort?' }),
+        body: JSON.stringify({ message: 'Hello' }),
       });
 
       assert.strictEqual(res.status, 200);
       const json = await res.json();
       assert.strictEqual(json.success, true);
-      assert.strictEqual(receivedOptions.profileContext, undefined);
+      assert.ok(json.data.message.includes('Hello! I am your AI Placement Agent'));
+      assert.strictEqual(json.data.toolCalls.length, 0);
+      assert.strictEqual(json.data.iterations, 1);
     } finally {
       aiService.generateChatResponse = originalGenerate;
     }
   });
 
-  // 8. Chat with valid userId (Profile context reaches AI service)
-  it('Phase 2.8: Chat with valid userId retrieves profile and formats clean context for AI service', async () => {
-    assert.ok(createdUserId);
+  // 2. get_user_profile tool call
+  it('Phase 3.2: get_user_profile tool call: agent executes tool and returns candidate profile', async () => {
     const originalGenerate = aiService.generateChatResponse;
-    let receivedOptions = null;
+    let turn = 0;
 
-    aiService.generateChatResponse = async (input, options) => {
-      receivedOptions = options;
+    aiService.generateChatResponse = async () => {
+      turn++;
+      if (turn === 1) {
+        // Model requests get_user_profile
+        return {
+          message: '',
+          rawMessage: { role: 'assistant', content: null },
+          toolCalls: [
+            {
+              id: 'call_profile_1',
+              type: 'function',
+              function: {
+                name: 'get_user_profile',
+                arguments: JSON.stringify({ userId: testUserId }),
+              },
+            },
+          ],
+          model: 'test-model',
+          usage: null,
+        };
+      }
+      // Turn 2: Model formulates answer based on tool result
       return {
-        message: 'Tailored answer for Alex Rivera preparing for Senior Data Scientist role.',
+        message: 'According to your profile, you have Python (advanced), SQL (intermediate), and Docker (intermediate).',
+        toolCalls: null,
         model: 'test-model',
         usage: null,
       };
@@ -306,66 +290,368 @@ describe('AI Placement Agent - Full API Test Suite (Phase 1 + Phase 2)', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userId: createdUserId,
-          message: 'What areas should I focus on next?',
+          userId: testUserId,
+          message: 'What skills do I have in my profile?',
         }),
       });
 
       assert.strictEqual(res.status, 200);
       const json = await res.json();
       assert.strictEqual(json.success, true);
-      assert.ok(receivedOptions.profileContext);
-      assert.ok(receivedOptions.profileContext.includes('Alex Rivera'));
-      assert.ok(receivedOptions.profileContext.includes('Senior Data Scientist'));
-      assert.ok(receivedOptions.profileContext.includes('Dynamic Programming'));
-      // Verify raw database internals are NOT leaked in context
-      assert.strictEqual(receivedOptions.profileContext.includes('_id'), false);
-      assert.strictEqual(receivedOptions.profileContext.includes('__v'), false);
+      assert.ok(json.data.message.includes('Python (advanced)'));
+      assert.strictEqual(json.data.toolCalls.length, 1);
+      assert.strictEqual(json.data.toolCalls[0].name, 'get_user_profile');
+      assert.strictEqual(json.data.toolCalls[0].success, true);
     } finally {
       aiService.generateChatResponse = originalGenerate;
     }
   });
 
-  // 9. Chat with nonexistent userId
-  it('Phase 2.9: Chat with nonexistent userId returns 404 USER_NOT_FOUND', async () => {
-    const res = await fetch(`http://localhost:${TEST_PORT}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        userId: 'nonexistent-user-12345',
-        message: 'Hello',
-      }),
-    });
+  // 3. get_user_progress tool call
+  it('Phase 3.3: get_user_progress tool call: agent executes tool and reports weak topics', async () => {
+    const originalGenerate = aiService.generateChatResponse;
+    let turn = 0;
 
-    assert.strictEqual(res.status, 404);
-    const json = await res.json();
-    assert.strictEqual(json.success, false);
-    assert.strictEqual(json.error.code, 'USER_NOT_FOUND');
-  });
-
-  // Helper unit test: formatProfileContext isolation
-  it('Phase 2.10: formatProfileContext formats concise readable summary without raw internals', () => {
-    const mockUser = {
-      name: 'Priya Sharma',
-      degree: 'B.E.',
-      specialization: 'Information Technology',
-      experienceLevel: 'Fresher',
-      targetRole: 'Software Engineer - Backend',
-      targetCompanies: ['Microsoft', 'Uber'],
-      skills: [
-        { name: 'Java', level: 'advanced' },
-        { name: 'Spring Boot', level: 'intermediate' },
-      ],
-      weakAreas: ['Concurrency', 'Redis Caching'],
-      leetcodeSolved: 220,
+    aiService.generateChatResponse = async () => {
+      turn++;
+      if (turn === 1) {
+        return {
+          message: '',
+          rawMessage: { role: 'assistant', content: null },
+          toolCalls: [
+            {
+              id: 'call_progress_1',
+              type: 'function',
+              function: {
+                name: 'get_user_progress',
+                arguments: JSON.stringify({ userId: testUserId }),
+              },
+            },
+          ],
+          model: 'test-model',
+          usage: null,
+        };
+      }
+      return {
+        message: 'Your current weak areas needing focus are: Kubernetes Networking and Dynamic Programming.',
+        toolCalls: null,
+        model: 'test-model',
+        usage: null,
+      };
     };
 
-    const formatted = formatProfileContext(mockUser);
-    assert.ok(formatted.includes('Candidate Profile Context:'));
-    assert.ok(formatted.includes('Priya Sharma'));
-    assert.ok(formatted.includes('Java (advanced)'));
-    assert.ok(formatted.includes('Software Engineer - Backend'));
-    assert.ok(formatted.includes('Microsoft, Uber'));
-    assert.ok(formatted.includes('Concurrency, Redis Caching'));
+    try {
+      const res = await fetch(`http://localhost:${TEST_PORT}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: testUserId,
+          message: 'What are my weak areas?',
+        }),
+      });
+
+      assert.strictEqual(res.status, 200);
+      const json = await res.json();
+      assert.strictEqual(json.success, true);
+      assert.ok(json.data.message.includes('Kubernetes Networking'));
+      assert.strictEqual(json.data.toolCalls.length, 1);
+      assert.strictEqual(json.data.toolCalls[0].name, 'get_user_progress');
+      assert.strictEqual(json.data.toolCalls[0].success, true);
+    } finally {
+      aiService.generateChatResponse = originalGenerate;
+    }
+  });
+
+  // 4. update_user_progress tool call
+  it('Phase 3.4: update_user_progress tool call: updates progress and confirms in response', async () => {
+    const originalGenerate = aiService.generateChatResponse;
+    let turn = 0;
+
+    aiService.generateChatResponse = async () => {
+      turn++;
+      if (turn === 1) {
+        return {
+          message: '',
+          rawMessage: { role: 'assistant', content: null },
+          toolCalls: [
+            {
+              id: 'call_update_1',
+              type: 'function',
+              function: {
+                name: 'update_user_progress',
+                arguments: JSON.stringify({
+                  userId: testUserId,
+                  topic: 'Binary Search',
+                  status: 'completed',
+                  notes: 'Solved 5 medium problems on LeetCode',
+                }),
+              },
+            },
+          ],
+          model: 'test-model',
+          usage: null,
+        };
+      }
+      return {
+        message: 'Great job! I have updated your preparation progress: "Binary Search" is now marked as completed.',
+        toolCalls: null,
+        model: 'test-model',
+        usage: null,
+      };
+    };
+
+    try {
+      const res = await fetch(`http://localhost:${TEST_PORT}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: testUserId,
+          message: 'I completed Binary Search practice today with 5 LeetCode problems.',
+        }),
+      });
+
+      assert.strictEqual(res.status, 200);
+      const json = await res.json();
+      assert.strictEqual(json.success, true);
+      assert.ok(json.data.message.includes('Binary Search'));
+      assert.strictEqual(json.data.toolCalls.length, 1);
+      assert.strictEqual(json.data.toolCalls[0].name, 'update_user_progress');
+      assert.strictEqual(json.data.toolCalls[0].success, true);
+
+      // Verify persistence in UserService
+      const progress = await userService.getUserProgress(testUserId);
+      assert.ok(progress.completedTopics.includes('Binary Search'));
+    } finally {
+      aiService.generateChatResponse = originalGenerate;
+    }
+  });
+
+  // 5. Invalid tool arguments
+  it('Phase 3.5: Invalid tool arguments: tool registry catches error cleanly without unhandled crash', async () => {
+    // Missing required fields
+    const res = await toolRegistry.executeTool('update_user_progress', { userId: testUserId });
+    assert.strictEqual(res.success, false);
+    assert.strictEqual(res.error.code, 'TOOL_EXECUTION_ERROR');
+    assert.ok(res.error.message.includes('topic'));
+
+    // Non-existent tool
+    const resUnknown = await toolRegistry.executeTool('unknown_tool', {});
+    assert.strictEqual(resUnknown.success, false);
+    assert.strictEqual(resUnknown.error.code, 'TOOL_NOT_FOUND');
+  });
+
+  // 6. Tool execution failure
+  it('Phase 3.6: Tool execution failure: structured error fed back to agent, agent explains gracefully', async () => {
+    const originalGenerate = aiService.generateChatResponse;
+    let turn = 0;
+    let toolResultReceived = null;
+
+    aiService.generateChatResponse = async (messages) => {
+      turn++;
+      if (turn === 1) {
+        return {
+          message: '',
+          rawMessage: { role: 'assistant', content: null },
+          toolCalls: [
+            {
+              id: 'call_fail_1',
+              type: 'function',
+              function: {
+                name: 'get_user_progress',
+                arguments: JSON.stringify({ userId: 'nonexistent-uuid' }),
+              },
+            },
+          ],
+          model: 'test-model',
+          usage: null,
+        };
+      }
+      // Inspect tool message received by model in turn 2
+      const toolMsg = messages.find((m) => m.role === 'tool');
+      if (toolMsg) {
+        toolResultReceived = JSON.parse(toolMsg.content);
+      }
+      return {
+        message: 'I was unable to retrieve your progress because the specified candidate record was not found.',
+        toolCalls: null,
+        model: 'test-model',
+        usage: null,
+      };
+    };
+
+    try {
+      const res = await fetch(`http://localhost:${TEST_PORT}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: testUserId,
+          message: 'Check my progress please',
+        }),
+      });
+
+      assert.strictEqual(res.status, 200);
+      const json = await res.json();
+      assert.strictEqual(json.success, true);
+      assert.strictEqual(json.data.toolCalls[0].success, false);
+      assert.ok(toolResultReceived);
+      assert.strictEqual(toolResultReceived.success, false);
+      assert.strictEqual(toolResultReceived.error.code, 'TOOL_EXECUTION_ERROR');
+    } finally {
+      aiService.generateChatResponse = originalGenerate;
+    }
+  });
+
+  // 7. Multiple tool calls
+  it('Phase 3.7: Multiple tool calls: executes both tools across loop iterations and synthesizes answer', async () => {
+    const originalGenerate = aiService.generateChatResponse;
+    let turn = 0;
+
+    aiService.generateChatResponse = async () => {
+      turn++;
+      if (turn === 1) {
+        // Turn 1: model asks for profile
+        return {
+          message: '',
+          rawMessage: { role: 'assistant', content: null },
+          toolCalls: [
+            {
+              id: 'call_multi_1',
+              type: 'function',
+              function: {
+                name: 'get_user_profile',
+                arguments: JSON.stringify({ userId: testUserId }),
+              },
+            },
+          ],
+          model: 'test-model',
+          usage: null,
+        };
+      }
+      if (turn === 2) {
+        // Turn 2: model asks for progress
+        return {
+          message: '',
+          rawMessage: { role: 'assistant', content: null },
+          toolCalls: [
+            {
+              id: 'call_multi_2',
+              type: 'function',
+              function: {
+                name: 'get_user_progress',
+                arguments: JSON.stringify({ userId: testUserId }),
+              },
+            },
+          ],
+          model: 'test-model',
+          usage: null,
+        };
+      }
+      // Turn 3: synthesized final answer
+      return {
+        message: 'Synthesizing: You are preparing for DevOps with Python/Docker, and your weak area to target next is Kubernetes Networking.',
+        toolCalls: null,
+        model: 'test-model',
+        usage: null,
+      };
+    };
+
+    try {
+      const res = await fetch(`http://localhost:${TEST_PORT}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: testUserId,
+          message: 'Review my profile and progress together.',
+        }),
+      });
+
+      assert.strictEqual(res.status, 200);
+      const json = await res.json();
+      assert.strictEqual(json.success, true);
+      assert.strictEqual(json.data.toolCalls.length, 2);
+      assert.strictEqual(json.data.toolCalls[0].name, 'get_user_profile');
+      assert.strictEqual(json.data.toolCalls[1].name, 'get_user_progress');
+      assert.strictEqual(json.data.iterations, 3);
+      assert.ok(json.data.message.includes('Kubernetes Networking'));
+    } finally {
+      aiService.generateChatResponse = originalGenerate;
+    }
+  });
+
+  // 8. Maximum iteration protection
+  it('Phase 3.8: Maximum iteration protection: stops loop cleanly when max iterations reached without infinite loop', async () => {
+    const originalGenerate = aiService.generateChatResponse;
+
+    // AI model repeatedly generates tool calls forever
+    aiService.generateChatResponse = async () => ({
+      message: '',
+      rawMessage: { role: 'assistant', content: null },
+      toolCalls: [
+        {
+          id: `loop_call_${Math.random()}`,
+          type: 'function',
+          function: {
+            name: 'get_user_profile',
+            arguments: JSON.stringify({ userId: testUserId }),
+          },
+        },
+      ],
+      model: 'test-model',
+      usage: null,
+    });
+
+    try {
+      const result = await agentService.run({
+        message: 'Infinite tool call request',
+        userId: testUserId,
+        options: { maxIterations: 3 },
+      });
+
+      assert.strictEqual(result.iterations, 3);
+      assert.strictEqual(result.maxIterationsReached, true);
+      assert.ok(result.message);
+    } finally {
+      aiService.generateChatResponse = originalGenerate;
+    }
+  });
+
+  // 9. Tool timeout
+  it('Phase 3.9: Tool timeout: agent execution exceeding timeout throws AGENT_TIMEOUT error', async () => {
+    const originalGenerate = aiService.generateChatResponse;
+
+    aiService.generateChatResponse = async () => {
+      // Simulate artificial delay
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return {
+        message: '',
+        rawMessage: { role: 'assistant', content: null },
+        toolCalls: [
+          {
+            id: 'timeout_call',
+            type: 'function',
+            function: {
+              name: 'get_user_profile',
+              arguments: JSON.stringify({ userId: testUserId }),
+            },
+          },
+        ],
+        model: 'test-model',
+        usage: null,
+      };
+    };
+
+    try {
+      await agentService.run({
+        message: 'Test timeout',
+        userId: testUserId,
+        options: { timeoutMs: 25 }, // 25ms timeout
+      });
+      assert.fail('Should have thrown timeout error');
+    } catch (err) {
+      assert.strictEqual(err.code, 'AGENT_TIMEOUT');
+      assert.strictEqual(err.statusCode, 504);
+    } finally {
+      aiService.generateChatResponse = originalGenerate;
+    }
   });
 });

@@ -1,9 +1,9 @@
-import { aiService } from '../services/ai/ai.service.js';
-import { userService, formatProfileContext } from '../services/user/user.service.js';
+import { agentService } from '../services/agent/agent.service.js';
+import { userService } from '../services/user/user.service.js';
 import { successResponse, errorResponse } from '../utils/apiResponse.js';
 
 /**
- * Handle incoming chat message
+ * Handle incoming chat message through the Agent Loop (Phase 3)
  * POST /api/chat
  * Body: { message: string, history?: Array<{role: string, content: string}>, userId?: string }
  */
@@ -39,8 +39,8 @@ export async function handleChatMessage(req, res, next) {
       );
     }
 
-    // Optional user profile context retrieval (Phase 2)
-    let profileContext = '';
+    // Validate userId if provided
+    let verifiedUserId = null;
     if (userId) {
       if (typeof userId !== 'string' || !userId.trim()) {
         return errorResponse(res, 'User ID must be a non-empty string if provided.', 400, 'VALIDATION_ERROR');
@@ -51,30 +51,25 @@ export async function handleChatMessage(req, res, next) {
         return errorResponse(res, `User with ID "${userId}" was not found.`, 404, 'USER_NOT_FOUND');
       }
 
-      profileContext = formatProfileContext(user);
+      verifiedUserId = user.id;
     }
 
-    // Support both single message and conversation history if provided
-    let inputPayload = trimmedMessage;
-    if (Array.isArray(history) && history.length > 0) {
-      inputPayload = [
-        ...history,
-        ...(trimmedMessage ? [{ role: 'user', content: trimmedMessage }] : []),
-      ];
-    }
-
-    const aiResult = await aiService.generateChatResponse(inputPayload, {
-      profileContext: profileContext || undefined,
+    // Execute through Agent Service
+    const agentResult = await agentService.run({
+      message: trimmedMessage,
+      history: Array.isArray(history) ? history : [],
+      userId: verifiedUserId,
     });
 
-    // Provide Section 18 standard format, while also keeping top-level message for Section 5 compatibility
     return res.status(200).json({
       success: true,
-      message: aiResult.message,
+      message: agentResult.message,
       data: {
-        message: aiResult.message,
-        model: aiResult.model,
-        usage: aiResult.usage,
+        message: agentResult.message,
+        model: agentResult.model,
+        usage: agentResult.usage,
+        iterations: agentResult.iterations,
+        toolCalls: agentResult.toolCalls || [],
       },
     });
   } catch (error) {

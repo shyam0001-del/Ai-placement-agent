@@ -79,6 +79,7 @@ export function useChat() {
           role: 'assistant',
           content: response.message,
           model: response.model,
+          toolCalls: response.toolCalls || [],
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         };
 

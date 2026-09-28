@@ -1,11 +1,25 @@
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Bot, User, Copy, Check, AlertCircle } from 'lucide-react';
+import { Bot, User, Copy, Check, AlertCircle, Sparkles } from 'lucide-react';
+
+function getFriendlyToolName(name) {
+  switch (name) {
+    case 'get_user_profile':
+      return 'Checked candidate profile';
+    case 'get_user_progress':
+      return 'Analyzed preparation progress';
+    case 'update_user_progress':
+      return 'Updated study progress';
+    default:
+      return 'Consulted preparation co-pilot tool';
+  }
+}
 
 export default function ChatMessage({ message }) {
   const isUser = message.role === 'user';
   const isError = message.isError;
+  const toolCalls = Array.isArray(message.toolCalls) ? message.toolCalls : [];
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
@@ -77,6 +91,21 @@ export default function ChatMessage({ message }) {
               )}
             </button>
           </div>
+
+          {/* Optional Tool Activity Badges (Section 14) */}
+          {toolCalls.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 my-2">
+              {toolCalls.map((t, idx) => (
+                <span
+                  key={idx}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] bg-slate-800/80 border border-slate-700 text-cyan-300 font-medium"
+                >
+                  <Sparkles className="w-3 h-3 text-cyan-400" />
+                  <span>{getFriendlyToolName(t.name)}</span>
+                </span>
+              ))}
+            </div>
+          )}
 
           {/* Render Markdown or plain text */}
           <div className="prose-chat text-sm break-words">

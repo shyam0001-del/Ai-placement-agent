@@ -82,17 +82,28 @@ class AiService {
     }
 
     try {
-      const response = await client.chat.completions.create({
+      const completionPayload = {
         model,
         messages,
         temperature: options.temperature ?? 0.7,
         max_tokens: options.maxTokens ?? 2048,
-      });
+      };
 
-      const replyContent = response.choices?.[0]?.message?.content?.trim() || '';
+      if (Array.isArray(options.tools) && options.tools.length > 0) {
+        completionPayload.tools = options.tools;
+        if (options.toolChoice) {
+          completionPayload.tool_choice = options.toolChoice;
+        }
+      }
+
+      const response = await client.chat.completions.create(completionPayload);
+      const choiceMessage = response.choices?.[0]?.message || {};
+      const replyContent = choiceMessage.content ? choiceMessage.content.trim() : '';
 
       return {
         message: replyContent,
+        rawMessage: choiceMessage,
+        toolCalls: choiceMessage.tool_calls || null,
         model: response.model || model,
         usage: response.usage || null,
       };

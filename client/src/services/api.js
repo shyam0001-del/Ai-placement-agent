@@ -56,6 +56,7 @@ export async function sendChatMessage(message, history = [], userId = null) {
       message: data.data?.message || data.message || '',
       model: data.data?.model || 'configured model',
       usage: data.data?.usage || null,
+      toolCalls: data.data?.toolCalls || [],
     };
   } catch (error) {
     if (error.name === 'TypeError' && (error.message.includes('fetch') || error.message.includes('network'))) {

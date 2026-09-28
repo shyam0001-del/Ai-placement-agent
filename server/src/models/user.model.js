@@ -22,6 +22,38 @@ const skillSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const progressItemSchema = new mongoose.Schema(
+  {
+    topic: {
+      type: String,
+      required: [true, 'Topic is required'],
+      trim: true,
+      maxlength: [100, 'Topic cannot exceed 100 characters'],
+    },
+    status: {
+      type: String,
+      enum: {
+        values: ['completed', 'in_progress', 'needs_review', 'weak'],
+        message: '{VALUE} is not a valid progress status',
+      },
+      default: 'in_progress',
+      trim: true,
+      lowercase: true,
+    },
+    notes: {
+      type: String,
+      trim: true,
+      default: '',
+      maxlength: [500, 'Notes cannot exceed 500 characters'],
+    },
+    updatedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
+
 const userSchema = new mongoose.Schema(
   {
     name: {
@@ -78,6 +110,10 @@ const userSchema = new mongoose.Schema(
     },
     weakAreas: {
       type: [{ type: String, trim: true, maxlength: 80 }],
+      default: [],
+    },
+    progress: {
+      type: [progressItemSchema],
       default: [],
     },
   },
