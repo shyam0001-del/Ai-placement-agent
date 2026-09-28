@@ -3,11 +3,12 @@ import assert from 'node:assert';
 import app from '../src/app.js';
 import { aiService } from '../src/services/ai/ai.service.js';
 import { userService, formatProfileContext } from '../src/services/user/user.service.js';
+import { memoryService } from '../src/services/memory/memory.service.js';
 import { toolRegistry } from '../src/services/tools/index.js';
 import { agentService } from '../src/services/agent/agent.service.js';
 import { getDatabaseStatus } from '../src/config/db.js';
 
-describe('AI Placement Agent - Full API & Agent Test Suite (Phase 1 + 2 + 3)', () => {
+describe('AI Placement Agent - Full API & Agent Test Suite (Phase 1 + 2 + 3 + 4)', () => {
   let server;
   const TEST_PORT = 5096;
   let testUserId = '';
@@ -46,6 +47,7 @@ describe('AI Placement Agent - Full API & Agent Test Suite (Phase 1 + 2 + 3)', (
       server.close(resolve);
     });
     userService.clearMemory();
+    memoryService.clearMemory();
   });
 
   // ==========================================
@@ -654,4 +656,437 @@ describe('AI Placement Agent - Full API & Agent Test Suite (Phase 1 + 2 + 3)', (
       aiService.generateChatResponse = originalGenerate;
     }
   });
+
+  // ==========================================
+  // PHASE 4 TESTS: MEMORY SYSTEM
+  // ==========================================
+
+  // 1. Create memory
+  it('Phase 4.1: Create memory stores structured durable candidate fact', async () => {
+    const memory = await memoryService.createOrUpdateMemory({
+      userId: testUserId,
+      type: 'goal',
+      key: 'Primary Placement Target',
+      value: 'Targeting Senior Data Analyst roles at high-growth tech companies',
+      source: 'conversation',
+      confidence: 0.95,
+      importance: 0.9,
+    });
+
+    assert.ok(memory.id || memory._id);
+    assert.strictEqual(memory.userId, testUserId);
+    assert.strictEqual(memory.type, 'goal');
+    assert.strictEqual(memory.key, 'Primary Placement Target');
+    assert.strictEqual(memory.confidence, 0.95);
+    assert.strictEqual(memory.importance, 0.9);
+  });
+
+  // 2. Retrieve memory
+  it('Phase 4.2: Retrieve memory returns user memories with metadata', async () => {
+    const memories = await memoryService.getMemoriesByUser(testUserId);
+    assert.ok(Array.isArray(memories));
+    assert.ok(memories.length >= 1);
+    const target = memories.find((m) => m.key === 'Primary Placement Target');
+    assert.ok(target);
+    assert.strictEqual(target.type, 'goal');
+  });
+
+  // 3. Update memory
+  it('Phase 4.3: Update memory modifies value, confidence, and importance', async () => {
+    const memories = await memoryService.getMemoriesByUser(testUserId);
+    const target = memories.find((m) => m.key === 'Primary Placement Target');
+    assert.ok(target);
+
+    const updated = await memoryService.updateMemory(target.id, {
+      value: 'Targeting Lead Data Analyst and Analytics Engineer roles',
+      confidence: 1.0,
+      importance: 0.95,
+    });
+
+    assert.strictEqual(updated.value, 'Targeting Lead Data Analyst and Analytics Engineer roles');
+    assert.strictEqual(updated.confidence, 1.0);
+    assert.strictEqual(updated.importance, 0.95);
+  });
+
+  // 4. Delete memory
+  it('Phase 4.4: Delete memory removes fact from persistence', async () => {
+    const tempMem = await memoryService.createOrUpdateMemory({
+      userId: testUserId,
+      type: 'preference',
+      key: 'Temporary Note',
+      value: 'Prefers afternoon study sessions',
+      confidence: 0.8,
+      importance: 0.5,
+    });
+
+    const deleted = await memoryService.deleteMemory(tempMem.id);
+    assert.strictEqual(deleted, true);
+
+    const afterList = await memoryService.getMemoriesByUser(testUserId);
+    assert.strictEqual(afterList.some((m) => m.key === 'Temporary Note'), false);
+  });
+
+  // 5. User isolation
+  it('Phase 4.5: User isolation guarantees memories cannot be read across users', async () => {
+    const userA = 'user_isolate_a_123';
+    const userB = 'user_isolate_b_456';
+
+    await memoryService.createOrUpdateMemory({
+      userId: userA,
+      type: 'weakness',
+      key: 'Confidential Weakness',
+      value: 'Struggles with recursion and trees',
+      confidence: 0.9,
+      importance: 0.8,
+    });
+
+    const userBMemories = await memoryService.getMemoriesByUser(userB);
+    assert.strictEqual(userBMemories.length, 0);
+
+    const userBRelevant = await memoryService.getRelevantMemories({
+      userId: userB,
+      query: 'recursion trees',
+    });
+    assert.strictEqual(userBRelevant.length, 0);
+  });
+
+  // 6. Invalid memory type
+  it('Phase 4.6: Invalid memory type rejects with validation error', async () => {
+    await assert.rejects(
+      async () => {
+        await memoryService.createOrUpdateMemory({
+          userId: testUserId,
+          type: 'uncontrolled_arbitrary_type',
+          key: 'Random Key',
+          value: 'Random value',
+        });
+      },
+      (err) => {
+        assert.ok(err.message.includes('Invalid memory type'));
+        return true;
+      }
+    );
+  });
+
+  // 7. Invalid confidence
+  it('Phase 4.7: Invalid confidence (<0 or >1) rejects with validation error', async () => {
+    await assert.rejects(
+      async () => {
+        await memoryService.createOrUpdateMemory({
+          userId: testUserId,
+          type: 'weakness',
+          key: 'Invalid Confidence Key',
+          value: 'Some value',
+          confidence: 1.5, // Invalid > 1.0
+        });
+      },
+      (err) => {
+        assert.ok(err.message.includes('Confidence must be between 0.0 and 1.0'));
+        return true;
+      }
+    );
+  });
+
+  // 8. Duplicate memory handling
+  it('Phase 4.8: Duplicate memory handling updates existing fact instead of inserting duplicate', async () => {
+    await memoryService.createOrUpdateMemory({
+      userId: testUserId,
+      type: 'weakness',
+      key: 'SQL Window Functions',
+      value: 'User struggles with basic OVER clause',
+      confidence: 0.7,
+      importance: 0.7,
+    });
+
+    // Update the same fact
+    const updated = await memoryService.createOrUpdateMemory({
+      userId: testUserId,
+      type: 'weakness',
+      key: 'SQL Window Functions',
+      value: 'User struggles with complex window functions like DENSE_RANK and LAG',
+      confidence: 0.95,
+      importance: 0.9,
+    });
+
+    const userMemories = await memoryService.getMemoriesByUser(testUserId);
+    const windowMemories = userMemories.filter((m) => m.key === 'SQL Window Functions');
+
+    assert.strictEqual(windowMemories.length, 1);
+    assert.strictEqual(updated.confidence, 0.95);
+    assert.strictEqual(updated.importance, 0.9);
+    assert.ok(updated.value.includes('DENSE_RANK and LAG'));
+  });
+
+  // 9. Relevant memory retrieval
+  it('Phase 4.9: Relevant memory retrieval filters by keyword and importance', async () => {
+    // Add distinct memories
+    await memoryService.createOrUpdateMemory({
+      userId: testUserId,
+      type: 'weakness',
+      key: 'SQL Query Optimization',
+      value: 'Frequently misses index scans and EXPLAIN plans',
+      confidence: 0.9,
+      importance: 0.85,
+    });
+    await memoryService.createOrUpdateMemory({
+      userId: testUserId,
+      type: 'preference',
+      key: 'IDE Dark Mode',
+      value: 'User prefers dark theme in code editors',
+      confidence: 0.9,
+      importance: 0.3,
+    });
+
+    const relevant = await memoryService.getRelevantMemories({
+      userId: testUserId,
+      query: 'What should I practice in SQL today?',
+    });
+
+    assert.ok(relevant.length >= 1);
+    const sqlMem = relevant.find((m) => m.key.includes('SQL'));
+    assert.ok(sqlMem);
+    assert.strictEqual(relevant.some((m) => m.key === 'IDE Dark Mode'), false);
+  });
+
+  // 10. Irrelevant memory exclusion
+  it('Phase 4.10: Irrelevant memory exclusion keeps unrelated facts out of context', async () => {
+    const relevant = await memoryService.getRelevantMemories({
+      userId: testUserId,
+      query: 'Prepare for Kubernetes networking and ingress controllers',
+    });
+
+    assert.strictEqual(relevant.some((m) => m.key === 'IDE Dark Mode'), false);
+    assert.strictEqual(relevant.some((m) => m.key === 'SQL Window Functions'), false);
+  });
+
+  // 11. Agent retrieving memory
+  it('Phase 4.11: Agent retrieving memory calls get_relevant_memories tool and uses it in response', async () => {
+    const originalGenerate = aiService.generateChatResponse;
+    let toolCallReceived = null;
+
+    // Step 1: Agent decides it needs to query memories
+    let step = 0;
+    aiService.generateChatResponse = async () => {
+      step++;
+      if (step === 1) {
+        return {
+          message: '',
+          rawMessage: { role: 'assistant', content: null },
+          toolCalls: [
+            {
+              id: 'call_mem_retrieval_1',
+              type: 'function',
+              function: {
+                name: 'get_relevant_memories',
+                arguments: JSON.stringify({ userId: testUserId, query: 'SQL weaknesses' }),
+              },
+            },
+          ],
+          model: 'test-model',
+          usage: null,
+        };
+      }
+      return {
+        message: 'Based on your known weakness in SQL Window Functions, I recommend practicing 5 LEAD/LAG problems today.',
+        rawMessage: { role: 'assistant', content: 'Based on your known weakness in SQL Window Functions, I recommend practicing 5 LEAD/LAG problems today.' },
+        toolCalls: [],
+        model: 'test-model',
+        usage: null,
+      };
+    };
+
+    try {
+      const result = await agentService.run({
+        message: 'What should I study for my upcoming SQL interview?',
+        userId: testUserId,
+      });
+
+      assert.strictEqual(result.toolCalls.length, 1);
+      assert.strictEqual(result.toolCalls[0].name, 'get_relevant_memories');
+      assert.strictEqual(result.toolCalls[0].status, 'success');
+      assert.ok(result.message.includes('SQL Window Functions'));
+    } finally {
+      aiService.generateChatResponse = originalGenerate;
+    }
+  });
+
+  // 12. Agent saving memory
+  it('Phase 4.12: Agent saving memory calls save_memory tool for durable facts', async () => {
+    const originalGenerate = aiService.generateChatResponse;
+
+    let step = 0;
+    aiService.generateChatResponse = async () => {
+      step++;
+      if (step === 1) {
+        return {
+          message: '',
+          rawMessage: { role: 'assistant', content: null },
+          toolCalls: [
+            {
+              id: 'call_mem_save_1',
+              type: 'function',
+              function: {
+                name: 'save_memory',
+                arguments: JSON.stringify({
+                  userId: testUserId,
+                  type: 'weakness',
+                  key: 'Graph Traversal Algorithms',
+                  value: 'Candidate frequently gets stuck on cycle detection in directed graphs (Tarjan/Kahn)',
+                  confidence: 0.9,
+                  importance: 0.85,
+                }),
+              },
+            },
+          ],
+          model: 'test-model',
+          usage: null,
+        };
+      }
+      return {
+        message: 'I have noted that Graph Traversal is a key area to reinforce. Let us tackle Kahn algorithm first.',
+        rawMessage: { role: 'assistant', content: 'I have noted that Graph Traversal is a key area to reinforce.' },
+        toolCalls: [],
+        model: 'test-model',
+        usage: null,
+      };
+    };
+
+    try {
+      const result = await agentService.run({
+        message: 'I keep failing graph traversal and cycle detection problems.',
+        userId: testUserId,
+      });
+
+      assert.strictEqual(result.toolCalls.length, 1);
+      assert.strictEqual(result.toolCalls[0].name, 'save_memory');
+      assert.strictEqual(result.toolCalls[0].status, 'success');
+
+      // Verify persistence in memoryService
+      const memories = await memoryService.getMemoriesByUser(testUserId);
+      const graphMem = memories.find((m) => m.key === 'Graph Traversal Algorithms');
+      assert.ok(graphMem);
+      assert.strictEqual(graphMem.type, 'weakness');
+      assert.strictEqual(graphMem.confidence, 0.9);
+    } finally {
+      aiService.generateChatResponse = originalGenerate;
+    }
+  });
+
+  // 13. Agent updating memory
+  it('Phase 4.13: Agent updating memory calls update_memory tool and persists updates', async () => {
+    const originalGenerate = aiService.generateChatResponse;
+
+    const memories = await memoryService.getMemoriesByUser(testUserId);
+    const graphMem = memories.find((m) => m.key === 'Graph Traversal Algorithms');
+    assert.ok(graphMem);
+
+    let step = 0;
+    aiService.generateChatResponse = async () => {
+      step++;
+      if (step === 1) {
+        return {
+          message: '',
+          rawMessage: { role: 'assistant', content: null },
+          toolCalls: [
+            {
+              id: 'call_mem_update_1',
+              type: 'function',
+              function: {
+                name: 'update_memory',
+                arguments: JSON.stringify({
+                  memoryId: graphMem.id,
+                  value: 'Candidate has improved on topological sort but still needs practice with Tarjan strongly connected components',
+                  confidence: 0.95,
+                  importance: 0.8,
+                }),
+              },
+            },
+          ],
+          model: 'test-model',
+          usage: null,
+        };
+      }
+      return {
+        message: 'Updated your progress on graph traversal!',
+        rawMessage: { role: 'assistant', content: 'Updated your progress on graph traversal!' },
+        toolCalls: [],
+        model: 'test-model',
+        usage: null,
+      };
+    };
+
+    try {
+      const result = await agentService.run({
+        message: 'I mastered Kahn topological sort! Still working on Tarjan SCC though.',
+        userId: testUserId,
+      });
+
+      assert.strictEqual(result.toolCalls.length, 1);
+      assert.strictEqual(result.toolCalls[0].name, 'update_memory');
+      assert.strictEqual(result.toolCalls[0].status, 'success');
+
+      const updated = await memoryService.getMemoriesByUser(testUserId);
+      const updatedMem = updated.find((m) => m.id === graphMem.id);
+      assert.ok(updatedMem.value.includes('Tarjan strongly connected components'));
+      assert.strictEqual(updatedMem.confidence, 0.95);
+    } finally {
+      aiService.generateChatResponse = originalGenerate;
+    }
+  });
+
+  // 14. REST API development endpoints (GET, POST, PATCH, DELETE)
+  it('Phase 4.14: REST API development endpoints (GET, POST, PATCH, DELETE) function properly', async () => {
+    // POST /api/users/:userId/memories
+    const postRes = await fetch(`http://localhost:${TEST_PORT}/api/users/${testUserId}/memories`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'achievement',
+        key: 'LeetCode 100 Solved',
+        value: 'Solved 100 LeetCode problems including 60 medium problems',
+        confidence: 1.0,
+        importance: 0.8,
+      }),
+    });
+    assert.strictEqual(postRes.status, 201);
+    const postData = await postRes.json();
+    assert.strictEqual(postData.success, true);
+    const createdId = postData.data.id;
+    assert.ok(createdId);
+
+    // GET /api/users/:userId/memories
+    const getRes = await fetch(`http://localhost:${TEST_PORT}/api/users/${testUserId}/memories`);
+    assert.strictEqual(getRes.status, 200);
+    const getData = await getRes.json();
+    assert.strictEqual(getData.success, true);
+    assert.ok(getData.data.some((m) => m.id === createdId));
+
+    // PATCH /api/memories/:memoryId
+    const patchRes = await fetch(`http://localhost:${TEST_PORT}/api/memories/${createdId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        value: 'Solved 150 LeetCode problems including 90 medium problems',
+        importance: 0.9,
+      }),
+    });
+    assert.strictEqual(patchRes.status, 200);
+    const patchData = await patchRes.json();
+    assert.strictEqual(patchData.success, true);
+    assert.strictEqual(patchData.data.value, 'Solved 150 LeetCode problems including 90 medium problems');
+
+    // DELETE /api/memories/:memoryId
+    const delRes = await fetch(`http://localhost:${TEST_PORT}/api/memories/${createdId}`, {
+      method: 'DELETE',
+    });
+    assert.strictEqual(delRes.status, 200);
+    const delData = await delRes.json();
+    assert.strictEqual(delData.success, true);
+
+    // Verify deleted
+    const verifyGet = await fetch(`http://localhost:${TEST_PORT}/api/users/${testUserId}/memories`);
+    const verifyData = await verifyGet.json();
+    assert.strictEqual(verifyData.data.some((m) => m.id === createdId), false);
+  });
 });
+

@@ -8,7 +8,10 @@ import {
   Trash2,
   Save,
   CheckCircle2,
+  Brain,
+  Sparkles,
 } from 'lucide-react';
+import { getUserMemories, deleteUserMemory } from '../services/api';
 
 export default function ProfileView({
   profile,
@@ -19,6 +22,68 @@ export default function ProfileView({
   successMessage,
   onBackToChat,
 }) {
+  const [memories, setMemories] = useState([]);
+  const [isMemoriesLoading, setIsMemoriesLoading] = useState(false);
+  const [memoryActionError, setMemoryActionError] = useState(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadMemories() {
+      if (!activeUserId) {
+        setMemories([]);
+        return;
+      }
+      try {
+        setIsMemoriesLoading(true);
+        const data = await getUserMemories(activeUserId);
+        if (isMounted) {
+          setMemories(data || []);
+        }
+      } catch (err) {
+        console.warn('Could not load memories:', err.message);
+      } finally {
+        if (isMounted) setIsMemoriesLoading(false);
+      }
+    }
+    loadMemories();
+    return () => {
+      isMounted = false;
+    };
+  }, [activeUserId]);
+
+  const handleDeleteMemory = async (memoryId) => {
+    try {
+      setMemoryActionError(null);
+      await deleteUserMemory(memoryId);
+      setMemories((prev) => prev.filter((m) => m.id !== memoryId));
+    } catch (err) {
+      setMemoryActionError(err.message || 'Failed to delete memory');
+    }
+  };
+
+  const getMemoryBadge = (type) => {
+    switch (type) {
+      case 'goal':
+        return { icon: '🎯', label: 'Goal', color: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20' };
+      case 'weakness':
+        return { icon: '⚠️', label: 'Weakness', color: 'text-amber-400 bg-amber-500/10 border-amber-500/20' };
+      case 'achievement':
+        return { icon: '🏆', label: 'Achievement', color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' };
+      case 'strength':
+        return { icon: '💪', label: 'Strength', color: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20' };
+      case 'preference':
+        return { icon: '💡', label: 'Preference', color: 'text-purple-400 bg-purple-500/10 border-purple-500/20' };
+      case 'learning_progress':
+        return { icon: '📈', label: 'Progress', color: 'text-blue-400 bg-blue-500/10 border-blue-500/20' };
+      case 'interview':
+        return { icon: '💼', label: 'Interview', color: 'text-violet-400 bg-violet-500/10 border-violet-500/20' };
+      case 'career':
+        return { icon: '🚀', label: 'Career', color: 'text-teal-400 bg-teal-500/10 border-teal-500/20' };
+      default:
+        return { icon: '📌', label: type, color: 'text-slate-400 bg-slate-850 border-slate-700' };
+    }
+  };
+
   const [formData, setFormData] = useState(() => ({
     name: profile?.name || '',
     email: profile?.email || '',
@@ -429,6 +494,99 @@ export default function ProfileView({
               </span>
             ))}
           </div>
+        </div>
+
+        {/* Section 5: Things AI Remembers (Phase 4 Memory) */}
+        <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-4 shadow-sm">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
+            <div className="flex items-center gap-2">
+              <Brain className="w-4 h-4 text-purple-400" />
+              <h2 className="text-sm font-semibold text-slate-200">Things AI Remembers</h2>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-purple-500/10 text-purple-300 border border-purple-500/20">
+                Phase 4 Memory
+              </span>
+            </div>
+            {activeUserId && (
+              <span className="text-[11px] text-slate-500 font-mono">
+                {memories.length} {memories.length === 1 ? 'item' : 'items'}
+              </span>
+            )}
+          </div>
+
+          <p className="text-xs text-slate-400">
+            Durable insights, strengths, weaknesses, and targets learned by the agent across conversations.
+          </p>
+
+          {memoryActionError && (
+            <div className="p-2.5 rounded-xl bg-rose-950/40 border border-rose-800/60 text-xs text-rose-300 flex items-center gap-2">
+              <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+              <span>{memoryActionError}</span>
+            </div>
+          )}
+
+          {!activeUserId ? (
+            <div className="py-6 text-center text-xs text-slate-500">
+              Save your profile to activate personalized long-term memory.
+            </div>
+          ) : isMemoriesLoading ? (
+            <div className="py-6 text-center text-xs text-slate-400 animate-pulse">
+              Loading candidate memories...
+            </div>
+          ) : memories.length === 0 ? (
+            <div className="py-6 px-4 rounded-xl border border-dashed border-slate-800 text-center">
+              <Sparkles className="w-5 h-5 text-slate-600 mx-auto mb-2" />
+              <p className="text-xs text-slate-400 font-medium">No long-term memories stored yet</p>
+              <p className="text-[11px] text-slate-500 mt-1 max-w-sm mx-auto">
+                As you chat with the AI Placement Agent, durable facts like target roles, study habits, and specific weaknesses will be automatically remembered here.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              {memories.map((mem) => {
+                const badge = getMemoryBadge(mem.type);
+                return (
+                  <div
+                    key={mem.id || mem._id}
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-xl bg-slate-950 border border-slate-800/90 hover:border-slate-700/80 transition"
+                  >
+                    <div className="flex items-start gap-3 min-w-0">
+                      <span className="text-base select-none mt-0.5">{badge.icon}</span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-semibold text-slate-200">
+                            {mem.key}
+                          </span>
+                          <span
+                            className={`px-1.5 py-0.2 rounded text-[10px] font-mono border ${badge.color}`}
+                          >
+                            {badge.label}
+                          </span>
+                          {typeof mem.confidence === 'number' && (
+                            <span className="text-[10px] text-slate-500 font-mono">
+                              conf: {(mem.confidence * 100).toFixed(0)}%
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-400 mt-0.5 break-words">
+                          {mem.value}
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteMemory(mem.id || mem._id)}
+                      className="self-end sm:self-center flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 hover:text-rose-200 border border-rose-500/20 text-xs transition cursor-pointer"
+                      title="Delete memory"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Delete memory</span>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Save Button */}

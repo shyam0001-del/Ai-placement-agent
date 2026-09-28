@@ -172,3 +172,45 @@ export async function deleteUserProfile(id) {
   }
   return data.data;
 }
+
+/**
+ * ========================================================
+ * Memory API Methods (Phase 4)
+ * Development-only endpoints until authentication exists
+ * ========================================================
+ */
+
+/**
+ * Fetch memories for a candidate
+ * @param {string} userId
+ */
+export async function getUserMemories(userId) {
+  if (!userId) return [];
+  const response = await fetch(`${API_BASE}/users/${encodeURIComponent(userId)}/memories`);
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.success) {
+    const err = new Error(data?.error?.message || 'Failed to fetch user memories');
+    err.code = data?.error?.code || 'MEMORY_FETCH_ERROR';
+    throw err;
+  }
+  return data.data || [];
+}
+
+/**
+ * Delete a memory record
+ * @param {string} memoryId
+ */
+export async function deleteUserMemory(memoryId) {
+  if (!memoryId) return false;
+  const response = await fetch(`${API_BASE}/memories/${encodeURIComponent(memoryId)}`, {
+    method: 'DELETE',
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.success) {
+    const err = new Error(data?.error?.message || 'Failed to delete memory');
+    err.code = data?.error?.code || 'MEMORY_DELETE_ERROR';
+    throw err;
+  }
+  return data.data;
+}
+

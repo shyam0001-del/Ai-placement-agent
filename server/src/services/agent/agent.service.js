@@ -33,9 +33,14 @@ export class AgentService {
     let systemPrompt =
       'You are the AI Placement Agent, an intelligent, empathetic, and rigorous placement preparation co-pilot for engineering candidates. ' +
       'Your goal is to help candidates crack their target technical roles. ' +
-      'You have access to tools to inspect and update candidate profile details and preparation progress. ' +
-      'When the user asks about their skills, profile, progress, weak areas, or wants to update a topic, SELECT AND EXECUTE the appropriate tool. ' +
-      'If the request is a general question, conceptual explanation, or greeting, answer directly without invoking tools.';
+      'You have access to tools to inspect profile details, track preparation progress, and access long-term candidate memory. ' +
+      'When the user asks about their skills, profile, progress, weak areas, or wants to record progress, select and execute the appropriate tool. ' +
+      'Long-Term Memory Rules: ' +
+      '1. Use "get_relevant_memories" to check past durable facts, established weaknesses, or past achievements when relevant to the user query. ' +
+      '2. Use "save_memory" ONLY when the candidate shares a durable, important fact (e.g. career goals, recurring weaknesses, established study habits). ' +
+      '3. NEVER save casual greetings, one-off questions, or conversational filler as memory. ' +
+      '4. Use "delete_memory" if the user explicitly asks to forget or remove a remembered fact. ' +
+      '5. If the request is a general question, conceptual explanation, or greeting, answer directly without invoking tools.';
 
     if (userId) {
       systemPrompt += `\n\nActive Candidate Context:\nThe current candidate's userId is "${userId}". Always pass this userId when calling candidate tools.`;
@@ -120,7 +125,14 @@ export class AgentService {
           }
 
           // Automatically inject active userId if tool requires it and model omitted it
-          if (userId && !toolArgs.userId && (toolName === 'get_user_profile' || toolName === 'get_user_progress' || toolName === 'update_user_progress')) {
+          const userIdTools = [
+            'get_user_profile',
+            'get_user_progress',
+            'update_user_progress',
+            'get_relevant_memories',
+            'save_memory',
+          ];
+          if (userId && !toolArgs.userId && userIdTools.includes(toolName)) {
             toolArgs.userId = userId;
           }
 
@@ -138,6 +150,7 @@ export class AgentService {
             name: toolName,
             args: toolArgs,
             success: toolResult.success,
+            status: toolResult.success ? 'success' : 'error',
             durationMs: toolDuration,
           });
 

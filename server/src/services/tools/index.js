@@ -1,6 +1,10 @@
 import { getUserProfileTool } from './getUserProfile.tool.js';
 import { getUserProgressTool } from './getUserProgress.tool.js';
 import { updateUserProgressTool } from './updateUserProgress.tool.js';
+import { getRelevantMemoriesTool } from './getRelevantMemories.tool.js';
+import { saveMemoryTool } from './saveMemory.tool.js';
+import { updateMemoryTool } from './updateMemory.tool.js';
+import { deleteMemoryTool } from './deleteMemory.tool.js';
 
 class ToolRegistry {
   constructor() {
@@ -8,6 +12,10 @@ class ToolRegistry {
     this.register(getUserProfileTool);
     this.register(getUserProgressTool);
     this.register(updateUserProgressTool);
+    this.register(getRelevantMemoriesTool);
+    this.register(saveMemoryTool);
+    this.register(updateMemoryTool);
+    this.register(deleteMemoryTool);
   }
 
   /**
