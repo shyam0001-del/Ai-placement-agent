@@ -8,19 +8,26 @@ const API_BASE = '/api';
  * Send a chat message to the backend
  * @param {string} message - User message
  * @param {Array<{role: string, content: string}>} [history] - Optional conversation history
+ * @param {string} [userId] - Optional active user profile ID (Phase 2)
  * @returns {Promise<{message: string, model?: string, usage?: Object}>}
  */
-export async function sendChatMessage(message, history = []) {
+export async function sendChatMessage(message, history = [], userId = null) {
   try {
+    const payload = {
+      message,
+      history,
+    };
+
+    if (userId && typeof userId === 'string' && userId.trim()) {
+      payload.userId = userId.trim();
+    }
+
     const response = await fetch(`${API_BASE}/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        message,
-        history,
-      }),
+      body: JSON.stringify(payload),
     });
 
     let data;
@@ -35,7 +42,7 @@ export async function sendChatMessage(message, history = []) {
         data?.error?.message ||
         data?.message ||
         (response.status === 404
-          ? 'API route not found. Verify backend server is running.'
+          ? 'API route or resource not found.'
           : response.status >= 500
           ? 'Backend service error. Please verify server logs.'
           : `Request failed with status ${response.status}`);
@@ -63,7 +70,7 @@ export async function sendChatMessage(message, history = []) {
 
 /**
  * Check backend server and AI service readiness
- * @returns {Promise<{status: string, configuredModel: string, aiReady: boolean, missingEnv?: string[]}>}
+ * @returns {Promise<{status: string, configuredModel: string, aiReady: boolean, database?: Object, missingEnv?: string[]}>}
  */
 export async function checkServerHealth() {
   try {
@@ -79,7 +86,88 @@ export async function checkServerHealth() {
       status: 'offline',
       configuredModel: 'Unknown',
       aiReady: false,
+      database: { status: 'offline', connected: false },
       error: error.message,
     };
   }
+}
+
+/**
+ * ========================================================
+ * User Profile API Methods (Phase 2)
+ * ========================================================
+ */
+
+/**
+ * Create a new user profile
+ * @param {Object} profileData
+ */
+export async function createUserProfile(profileData) {
+  const response = await fetch(`${API_BASE}/users`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(profileData),
+  });
+
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.success) {
+    const err = new Error(data?.error?.message || 'Failed to create user profile');
+    err.code = data?.error?.code || 'USER_CREATE_ERROR';
+    throw err;
+  }
+  return data.data;
+}
+
+/**
+ * Retrieve user profile by ID
+ * @param {string} id
+ */
+export async function getUserProfile(id) {
+  const response = await fetch(`${API_BASE}/users/${encodeURIComponent(id)}`);
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.success) {
+    const err = new Error(data?.error?.message || 'Failed to fetch user profile');
+    err.code = data?.error?.code || 'USER_FETCH_ERROR';
+    throw err;
+  }
+  return data.data;
+}
+
+/**
+ * Update an existing user profile
+ * @param {string} id
+ * @param {Object} updateData
+ */
+export async function updateUserProfile(id, updateData) {
+  const response = await fetch(`${API_BASE}/users/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updateData),
+  });
+
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.success) {
+    const err = new Error(data?.error?.message || 'Failed to update user profile');
+    err.code = data?.error?.code || 'USER_UPDATE_ERROR';
+    throw err;
+  }
+  return data.data;
+}
+
+/**
+ * Delete a user profile
+ * @param {string} id
+ */
+export async function deleteUserProfile(id) {
+  const response = await fetch(`${API_BASE}/users/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.success) {
+    const err = new Error(data?.error?.message || 'Failed to delete user profile');
+    err.code = data?.error?.code || 'USER_DELETE_ERROR';
+    throw err;
+  }
+  return data.data;
 }

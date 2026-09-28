@@ -51,6 +51,11 @@ class AiService {
       'Provide structured, clear, and actionable advice. When explaining technical concepts, use concise explanations, clear examples, and best-practice frameworks. ' +
       'Maintain an encouraging, highly professional tone.';
 
+    let systemPromptContent = options.systemPrompt || defaultSystemPrompt;
+    if (options.profileContext) {
+      systemPromptContent += `\n\n${options.profileContext}\nTailor your guidance, questions, and roadmaps to this candidate's background, target role, and focus areas.`;
+    }
+
     let messages = [];
 
     if (Array.isArray(input)) {
@@ -58,7 +63,7 @@ class AiService {
       const hasSystem = input.some((m) => m.role === 'system');
       if (!hasSystem) {
         messages = [
-          { role: 'system', content: options.systemPrompt || defaultSystemPrompt },
+          { role: 'system', content: systemPromptContent },
           ...input,
         ];
       } else {
@@ -66,7 +71,7 @@ class AiService {
       }
     } else if (typeof input === 'string') {
       messages = [
-        { role: 'system', content: options.systemPrompt || defaultSystemPrompt },
+        { role: 'system', content: systemPromptContent },
         { role: 'user', content: input },
       ];
     } else {

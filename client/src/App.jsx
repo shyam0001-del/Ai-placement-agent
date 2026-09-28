@@ -3,16 +3,28 @@ import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import ChatArea from './components/ChatArea';
 import ChatInput from './components/ChatInput';
+import ProfileView from './components/ProfileView';
 import { useChat } from './hooks/useChat';
+import { useProfile } from './hooks/useProfile';
 
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [inputValue, setInputValue] = useState('');
+  const [activeTab, setActiveTab] = useState('chat'); // 'chat' | 'profile'
+
+  const {
+    profile,
+    activeUserId,
+    isLoading: isProfileLoading,
+    error: profileError,
+    successMessage: profileSuccess,
+    saveProfile,
+  } = useProfile();
 
   const {
     messages,
-    isLoading,
-    error,
+    isLoading: isChatLoading,
+    error: chatError,
     serverStatus,
     sendMessage,
     clearChat,
@@ -20,14 +32,15 @@ export default function App() {
   } = useChat();
 
   const handleSend = () => {
-    if (!inputValue.trim() || isLoading) return;
+    if (!inputValue.trim() || isChatLoading) return;
     const text = inputValue;
     setInputValue('');
-    sendMessage(text);
+    sendMessage(text, activeUserId || null);
   };
 
   const handleSelectPrompt = (promptText) => {
-    sendMessage(promptText);
+    setActiveTab('chat');
+    sendMessage(promptText, activeUserId || null);
   };
 
   return (
@@ -39,9 +52,12 @@ export default function App() {
         serverStatus={serverStatus}
         onNewChat={clearChat}
         onSelectPrompt={handleSelectPrompt}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        activeProfile={profile}
       />
 
-      {/* Main Chat Interface */}
+      {/* Main View Area */}
       <main className="flex-1 flex flex-col min-w-0 h-full relative">
         <Header
           sidebarOpen={sidebarOpen}
@@ -49,22 +65,39 @@ export default function App() {
           serverStatus={serverStatus}
           onClearChat={clearChat}
           hasMessages={messages.length > 0}
+          activeProfile={profile}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
         />
 
-        <ChatArea
-          messages={messages}
-          isLoading={isLoading}
-          error={error}
-          onRetry={retryLastMessage}
-          onSelectPrompt={handleSelectPrompt}
-        />
+        {activeTab === 'chat' ? (
+          <>
+            <ChatArea
+              messages={messages}
+              isLoading={isChatLoading}
+              error={chatError}
+              onRetry={retryLastMessage}
+              onSelectPrompt={handleSelectPrompt}
+            />
 
-        <ChatInput
-          input={inputValue}
-          setInput={setInputValue}
-          onSend={handleSend}
-          isLoading={isLoading}
-        />
+            <ChatInput
+              input={inputValue}
+              setInput={setInputValue}
+              onSend={handleSend}
+              isLoading={isChatLoading}
+            />
+          </>
+        ) : (
+          <ProfileView
+            profile={profile}
+            activeUserId={activeUserId}
+            onSave={saveProfile}
+            isLoading={isProfileLoading}
+            error={profileError}
+            successMessage={profileSuccess}
+            onBackToChat={() => setActiveTab('chat')}
+          />
+        )}
       </main>
     </div>
   );

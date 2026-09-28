@@ -1,9 +1,11 @@
 import express from 'express';
 import cors from 'cors';
 import { config, validateAiConfig } from './config/env.js';
+import { getDatabaseStatus } from './config/db.js';
 import { requestLogger } from './middleware/requestLogger.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import chatRoutes from './routes/chat.routes.js';
+import userRoutes from './routes/user.routes.js';
 import { successResponse } from './utils/apiResponse.js';
 
 const app = express();
@@ -12,11 +14,10 @@ const app = express();
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (like mobile apps, curl, postman) or matching origin
       if (!origin || origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
         return callback(null, true);
       }
-      return callback(null, true); // Dev-friendly permissive for local dev
+      return callback(null, true);
     },
     credentials: true,
   })
@@ -28,11 +29,14 @@ app.use(requestLogger);
 // Health & System Info
 app.get('/api/health', (req, res) => {
   const { isValid, missing } = validateAiConfig();
+  const dbStatus = getDatabaseStatus();
+
   return successResponse(res, {
     status: 'online',
     service: 'AI Placement Agent Server',
     configuredModel: config.openai.model || 'Not configured',
     aiReady: isValid,
+    database: dbStatus,
     ...(missing.length > 0 ? { missingEnv: missing } : {}),
     timestamp: new Date().toISOString(),
   });
@@ -40,6 +44,7 @@ app.get('/api/health', (req, res) => {
 
 // Mount Routes
 app.use('/api', chatRoutes);
+app.use('/api', userRoutes);
 
 // 404 & Centralized Error Handlers
 app.use(notFoundHandler);

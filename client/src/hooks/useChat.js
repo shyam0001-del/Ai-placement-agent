@@ -45,7 +45,7 @@ export function useChat() {
   }, []);
 
   const sendMessage = useCallback(
-    async (content) => {
+    async (content, userId = null) => {
       const trimmed = content.trim();
       if (!trimmed || isLoading) return;
 
@@ -71,7 +71,7 @@ export function useChat() {
         }));
 
       try {
-        const response = await sendChatMessage(trimmed, currentHistory);
+        const response = await sendChatMessage(trimmed, currentHistory, userId);
 
         const assistantMsgId = `assistant-${Date.now()}`;
         const assistantMessage = {
@@ -89,6 +89,7 @@ export function useChat() {
         setError({
           message: errorMessageText,
           lastSentMessage: trimmed,
+          lastUserId: userId,
         });
 
         // Add visual error message to conversation
@@ -118,10 +119,11 @@ export function useChat() {
   const retryLastMessage = useCallback(() => {
     if (!error?.lastSentMessage || isLoading) return;
     const toRetry = error.lastSentMessage;
+    const toUserId = error.lastUserId;
     // Remove the trailing error message if any
     setMessages((prev) => prev.filter((m) => !m.isError));
     setError(null);
-    sendMessage(toRetry);
+    sendMessage(toRetry, toUserId);
   }, [error, isLoading, sendMessage]);
 
   return {

@@ -27,6 +27,7 @@ The agent's multi-phase architecture is designed to:
 
 - **Frontend:** React 19, Vite, Tailwind CSS v4, Lucide Icons, React Markdown (GFM support)
 - **Backend:** Node.js, Express.js (ES Modules), CORS, dotenv
+- **Database (Phase 2):** MongoDB with Mongoose (with automated graceful degradation / in-memory fallback)
 - **AI Integration:** OpenAI-compatible official SDK (`openai`), dynamically configured through environment variables
 - **Testing:** Node.js native test runner (`node --test`), Oxlint
 - **Architecture Philosophy:** Decoupled client/server, clean layer separation, zero hardcoded model names, defensive error handling
@@ -46,18 +47,20 @@ ai-placement-agent/
 │   ├── public/
 │   ├── src/
 │   │   ├── components/        # Modular UI components
-│   │   │   ├── Header.jsx       # Top navigation, status indicator, model badge
-│   │   │   ├── Sidebar.jsx      # Session history & roadmap tracker
+│   │   │   ├── Header.jsx       # Top navigation, status indicator, candidate badge
+│   │   │   ├── Sidebar.jsx      # Session history, navigation tabs, roadmap tracker
 │   │   │   ├── ChatArea.jsx     # Message list, auto-scrolling, typing skeleton
 │   │   │   ├── ChatMessage.jsx  # Markdown-rendered bubbles with copy action
 │   │   │   ├── ChatInput.jsx    # Auto-resizing textarea with keyboard shortcuts
 │   │   │   ├── EmptyState.jsx   # Placement prep prompt starter cards
-│   │   │   └── ErrorBanner.jsx  # Diagnostic error alerts & retry action
+│   │   │   ├── ErrorBanner.jsx  # Diagnostic error alerts & retry action
+│   │   │   └── ProfileView.jsx  # Candidate profile management form
 │   │   ├── hooks/
-│   │   │   └── useChat.js       # Conversation state, error handling, health polling
+│   │   │   ├── useChat.js       # Conversation state, error handling, health polling
+│   │   │   └── useProfile.js    # Candidate profile synchronization & localStorage
 │   │   ├── services/
-│   │   │   └── api.js           # Fetch client for /api/chat and /api/health
-│   │   ├── App.jsx              # Main dashboard layout
+│   │   │   └── api.js           # Fetch client for /api/chat, /api/users, /api/health
+│   │   ├── App.jsx              # Main view coordinator (Chat vs. Profile)
 │   │   ├── index.css            # Tailwind CSS v4 entrypoint & typography
 │   │   └── main.jsx             # React DOM entrypoint
 │   ├── index.html
@@ -67,23 +70,30 @@ ai-placement-agent/
 └── server/                    # Node.js + Express Backend
     ├── src/
     │   ├── config/
+    │   │   ├── db.js            # MongoDB connection manager with credential sanitization
     │   │   └── env.js           # Centralized configuration & environment validation
     │   ├── controllers/
-    │   │   └── chat.controller.js  # Request validation & AI invocation
+    │   │   ├── chat.controller.js  # Chat handler & profile-context injection
+    │   │   └── user.controller.js  # User Profile CRUD controller
     │   ├── middleware/
     │   │   ├── errorHandler.js  # Standardized error and 404 responses
     │   │   └── requestLogger.js # Request ID and latency logging
+    │   ├── models/
+    │   │   └── user.model.js    # Mongoose schema for candidate profile
     │   ├── routes/
-    │   │   └── chat.routes.js   # Route definitions (/api/chat)
+    │   │   ├── chat.routes.js   # Route definitions (/api/chat)
+    │   │   └── user.routes.js   # User CRUD routes (/api/users)
     │   ├── services/
-    │   │   └── ai/
-    │   │       └── ai.service.js # LLM client singleton with fallback & options
+    │   │   ├── ai/
+    │   │   │   └── ai.service.js   # LLM client singleton with profileContext option
+    │   │   └── user/
+    │   │       └── user.service.js # User persistence and prompt context formatter
     │   ├── utils/
     │   │   └── apiResponse.js   # Standardized JSON response envelope
     │   ├── app.js               # Express application pipeline
-    │   └── server.js            # HTTP server bootstrap
+    │   └── server.js            # HTTP server bootstrap & DB connection
     ├── test/
-    │   └── api.test.js          # Automated endpoint and validation test suite
+    │   └── api.test.js          # Automated verification test suite (Phase 1 & Phase 2)
     ├── .env.example
     └── package.json
 ```
@@ -105,135 +115,75 @@ NODE_ENV=development
 CORS_ORIGIN=http://localhost:5173
 
 # OpenAI-Compatible LLM API Configuration
-# Works with OpenAI, Groq, Ollama, OpenRouter, DeepSeek, etc.
 OPENAI_API_KEY=your_openai_api_key_here
 OPENAI_MODEL=gpt-4o-mini
-
-# Optional base URL (leave commented for default OpenAI API)
 # OPENAI_BASE_URL=https://api.openai.com/v1
 
-# MongoDB Connection String (For Phase 2+)
+# MongoDB Connection String (Phase 2 Profile Persistence)
 MONGODB_URI=mongodb://localhost:27017/placement_agent
 ```
-
-> **Crucial Rule:** The model name is **NEVER** hardcoded in the codebase. It must always be supplied through `OPENAI_MODEL`.
 
 ---
 
 ## 5. Getting Started & Running Locally
 
-### Step 1: Clone and Install Dependencies
-From the repository root:
+### Step 1: Install Dependencies
 ```bash
 npm run install:all
 ```
-*(Or install separately inside `server/` and `client/` using `npm install`)*
 
 ### Step 2: Configure Environment
-Copy `.env.example` to `.env`:
+Copy `server/.env.example` to `server/.env` and adjust variables as needed:
 ```bash
 cp server/.env.example server/.env
 ```
-Edit `server/.env` and provide your `OPENAI_API_KEY` and preferred `OPENAI_MODEL` (e.g., `gpt-4o-mini`, `gpt-4o`, `llama-3.3-70b-versatile`, etc.).
 
 ### Step 3: Run Backend Server
-In a terminal:
 ```bash
 npm run dev:server
 ```
-The server starts on `http://localhost:5000`.
+Runs on `http://localhost:5000`. Connects to MongoDB on startup or runs in graceful fallback mode if offline.
 
 ### Step 4: Run Frontend Client
-In a second terminal:
 ```bash
 npm run dev:client
 ```
-The client starts on `http://localhost:5173`.
+Runs on `http://localhost:5173`.
 
 ---
 
-## 6. API Specifications (Phase 1)
+## 6. API Specifications
 
-### `GET /api/health`
-Checks server status, configured model, and AI engine readiness.
+### User Profile Endpoints (Phase 2)
 
-**Response:**
+- `POST /api/users` — Create candidate profile (Name, Email, Degree, Skills, Target Role/Companies, LeetCode count, Weak Areas).
+- `GET /api/users/:id` — Retrieve candidate profile by ID.
+- `PATCH /api/users/:id` — Update profile fields.
+- `DELETE /api/users/:id` — Delete profile by ID.
+
+### Chat Endpoint
+
+- `POST /api/chat` — Sends a message with optional `userId` for candidate context:
 ```json
 {
-  "success": true,
-  "data": {
-    "status": "online",
-    "service": "AI Placement Agent Server",
-    "configuredModel": "gpt-4o-mini",
-    "aiReady": true,
-    "timestamp": "2026-09-28T17:00:00.000Z"
-  }
+  "userId": "6abaa9c4bd153abf38c566ac",
+  "message": "What should I study for my upcoming interview?"
 }
 ```
+*Backward compatibility preserved: `userId` is completely optional.*
 
-### `POST /api/chat`
-Sends a student query to the AI Placement Agent.
+### Health Endpoint
 
-**Request:**
-```json
-{
-  "message": "What should I study for a data analyst interview in 14 days?"
-}
-```
-
-**Success Response (HTTP 200):**
-```json
-{
-  "success": true,
-  "message": "For a 14-day Data Analyst preparation sprint...",
-  "data": {
-    "message": "For a 14-day Data Analyst preparation sprint...",
-    "model": "gpt-4o-mini",
-    "usage": {
-      "prompt_tokens": 85,
-      "completion_tokens": 310,
-      "total_tokens": 395
-    }
-  }
-}
-```
-
-**Error Response (HTTP 400 / 500):**
-```json
-{
-  "success": false,
-  "error": {
-    "code": "VALIDATION_ERROR",
-    "message": "Message cannot be blank."
-  }
-}
-```
+- `GET /api/health` — Checks status of server, configured LLM, and MongoDB connectivity.
 
 ---
 
-## 7. Testing & Verification
-
-Run backend unit and integration tests:
-```bash
-npm run test:server
-```
-Run frontend linting check:
-```bash
-npm run lint:client
-```
-Build frontend production bundle:
-```bash
-npm run build:client
-```
-
----
-
-## 8. Multi-Phase Roadmap
+## 7. Multi-Phase Roadmap
 
 | Phase | Milestone | Description | Status |
 |---|---|---|---|
 | **Phase 1** | **Core AI Chat** | Decoupled client/server, AI service, configurable LLM, responsive UI | **COMPLETED** |
-| **Phase 2** | **User Profile** | MongoDB models for degree, skills, target role/companies, prep stats | *Upcoming* |
+| **Phase 2** | **User Profile** | MongoDB models, CRUD APIs, UI profile sync, and structured chat context | **COMPLETED** |
 | **Phase 3** | **Tool Calling** | Tool system (`get_user_profile`, `generate_questions`, `get_progress`) | *Upcoming* |
 | **Phase 4** | **Structured Memory** | Short-term context pruning + long-term explicit student memory | *Upcoming* |
 | **Phase 5** | **Placement Intelligence** | Gap analysis, role benchmarking, personalized roadmaps | *Upcoming* |

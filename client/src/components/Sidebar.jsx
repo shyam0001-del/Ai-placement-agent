@@ -3,6 +3,8 @@ import {
   Bot,
   Plus,
   MessageSquare,
+  User,
+  Database,
   Cpu,
 } from 'lucide-react';
 
@@ -12,8 +14,10 @@ export default function Sidebar({
   serverStatus,
   onNewChat,
   onSelectPrompt,
+  activeTab = 'chat',
+  setActiveTab,
+  activeProfile = null,
 }) {
-  // Placeholder chat history items demonstrating realistic placement workflows
   const placeholderHistory = [
     {
       id: 'h1',
@@ -36,26 +40,19 @@ export default function Sidebar({
       time: '3 days ago',
       active: false,
     },
-    {
-      id: 'h4',
-      title: 'STAR Method: Project Leadership Mock',
-      role: 'Behavioral Prep',
-      time: 'Last week',
-      active: false,
-    },
   ];
 
-  // Roadmap phases preview (informing the user about the upcoming architecture)
   const upcomingPhases = [
-    { name: 'Phase 1: Basic AI Chat', status: 'active', desc: 'Current Phase' },
-    { name: 'Phase 2: User Profile', status: 'upcoming', desc: 'Skills & Target Role' },
+    { name: 'Phase 1: Basic AI Chat', status: 'completed', desc: 'Core chat engine' },
+    { name: 'Phase 2: User Profile', status: 'active', desc: 'MongoDB candidate context' },
     { name: 'Phase 3: Tool Calling', status: 'upcoming', desc: 'Agentic Tools' },
     { name: 'Phase 4: Structured Memory', status: 'upcoming', desc: 'Long-term Tracking' },
   ];
 
+  const isDbConnected = serverStatus?.database?.connected;
+
   return (
     <>
-      {/* Mobile backdrop */}
       {sidebarOpen && (
         <div
           onClick={() => setSidebarOpen(false)}
@@ -86,10 +83,51 @@ export default function Sidebar({
           </div>
         </div>
 
-        {/* New Chat Button */}
-        <div className="p-3">
+        {/* Navigation Tabs */}
+        <div className="p-3 pb-0 space-y-1">
           <button
             onClick={() => {
+              setActiveTab('chat');
+              if (window.innerWidth < 768) setSidebarOpen(false);
+            }}
+            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition cursor-pointer ${
+              activeTab === 'chat'
+                ? 'bg-slate-800 text-cyan-300 border border-slate-700/80'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-850'
+            }`}
+          >
+            <MessageSquare className="w-4 h-4 text-cyan-400" />
+            <span>AI Placement Chat</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setActiveTab('profile');
+              if (window.innerWidth < 768) setSidebarOpen(false);
+            }}
+            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition cursor-pointer ${
+              activeTab === 'profile'
+                ? 'bg-slate-800 text-cyan-300 border border-slate-700/80'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-850'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <User className="w-4 h-4 text-indigo-400" />
+              <span>Candidate Profile</span>
+            </div>
+            {activeProfile?.name ? (
+              <span className="w-2 h-2 rounded-full bg-emerald-400" title="Profile configured" />
+            ) : (
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-500">NEW</span>
+            )}
+          </button>
+        </div>
+
+        {/* New Chat Button */}
+        <div className="p-3 pt-2">
+          <button
+            onClick={() => {
+              setActiveTab('chat');
               onNewChat();
               if (window.innerWidth < 768) setSidebarOpen(false);
             }}
@@ -100,7 +138,7 @@ export default function Sidebar({
           </button>
         </div>
 
-        {/* Conversation History Placeholder */}
+        {/* Sessions & History */}
         <div className="flex-1 overflow-y-auto px-3 py-2 space-y-4">
           <div>
             <div className="flex items-center justify-between px-2 pb-2 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
@@ -113,11 +151,12 @@ export default function Sidebar({
                 <div
                   key={item.id}
                   className={`group w-full text-left p-2.5 rounded-lg text-xs transition cursor-pointer flex items-start gap-2.5 ${
-                    item.active
+                    item.active && activeTab === 'chat'
                       ? 'bg-slate-800/90 text-slate-200 border border-slate-700'
                       : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
                   }`}
                   onClick={() => {
+                    setActiveTab('chat');
                     if (item.active) return;
                     onSelectPrompt(`Let's focus on: ${item.title}`);
                     if (window.innerWidth < 768) setSidebarOpen(false);
@@ -139,8 +178,8 @@ export default function Sidebar({
           {/* Architecture Roadmap Tracker */}
           <div className="pt-2 border-t border-slate-800/80">
             <div className="px-2 pb-2 text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center justify-between">
-              <span>Roadmap Roadmap</span>
-              <span className="text-[10px] text-emerald-400 font-mono">P1 ACTIVE</span>
+              <span>Roadmap</span>
+              <span className="text-[10px] text-emerald-400 font-mono">P2 ACTIVE</span>
             </div>
 
             <div className="space-y-1.5">
@@ -150,7 +189,9 @@ export default function Sidebar({
                   className={`p-2 rounded-lg text-[11px] border ${
                     phase.status === 'active'
                       ? 'bg-indigo-950/30 border-indigo-500/30 text-indigo-200'
-                      : 'bg-slate-950/40 border-slate-850/60 text-slate-400'
+                      : phase.status === 'completed'
+                      ? 'bg-slate-950/40 border-slate-850/60 text-slate-300'
+                      : 'bg-slate-950/40 border-slate-850/60 text-slate-500'
                   }`}
                 >
                   <div className="flex items-center justify-between font-medium">
@@ -159,8 +200,10 @@ export default function Sidebar({
                       <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono font-bold">
                         LIVE
                       </span>
+                    ) : phase.status === 'completed' ? (
+                      <span className="text-[9px] text-emerald-400 font-mono">DONE</span>
                     ) : (
-                      <span className="text-[9px] text-slate-400 font-mono">NEXT</span>
+                      <span className="text-[9px] text-slate-500 font-mono">NEXT</span>
                     )}
                   </div>
                   <p className="text-[10px] text-slate-400 mt-0.5">{phase.desc}</p>
@@ -170,21 +213,38 @@ export default function Sidebar({
           </div>
         </div>
 
-        {/* Footer: System Status */}
-        <div className="p-3 border-t border-slate-800 bg-slate-900/90 text-xs">
-          <div className="p-2.5 rounded-lg bg-slate-950/80 border border-slate-800 flex items-center justify-between">
+        {/* Footer: Server & Database Status */}
+        <div className="p-3 border-t border-slate-800 bg-slate-900/90 text-xs space-y-1.5">
+          <div className="p-2 rounded-lg bg-slate-950/80 border border-slate-800 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Cpu className="w-4 h-4 text-cyan-400" />
+              <Database className="w-3.5 h-3.5 text-indigo-400" />
               <div>
-                <p className="text-[11px] font-semibold text-slate-300">Backend Server</p>
+                <p className="text-[11px] font-semibold text-slate-300">MongoDB</p>
                 <p className="text-[10px] text-slate-400 font-mono">
-                  {serverStatus?.status === 'online' ? 'Online :5000' : 'Checking status...'}
+                  {isDbConnected ? 'Connected' : 'Fallback / In-Memory'}
                 </p>
               </div>
             </div>
             <div
               className={`w-2 h-2 rounded-full ${
-                serverStatus?.aiReady ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]' : 'bg-amber-400'
+                isDbConnected ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]' : 'bg-amber-400'
+              }`}
+            />
+          </div>
+
+          <div className="p-2 rounded-lg bg-slate-950/80 border border-slate-800 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Cpu className="w-3.5 h-3.5 text-cyan-400" />
+              <div>
+                <p className="text-[11px] font-semibold text-slate-300">AI Server</p>
+                <p className="text-[10px] text-slate-400 font-mono">
+                  {serverStatus?.status === 'online' ? 'Port 5000' : 'Offline'}
+                </p>
+              </div>
+            </div>
+            <div
+              className={`w-2 h-2 rounded-full ${
+                serverStatus?.status === 'online' ? 'bg-emerald-400' : 'bg-rose-400'
               }`}
             />
           </div>
