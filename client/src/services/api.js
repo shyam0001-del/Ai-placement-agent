@@ -23,10 +23,22 @@ export async function sendChatMessage(message, history = []) {
       }),
     });
 
-    const data = await response.json();
+    let data;
+    try {
+      data = await response.json();
+    } catch {
+      data = null;
+    }
 
-    if (!response.ok || !data.success) {
-      const errorMsg = data?.error?.message || data?.message || `Request failed with status ${response.status}`;
+    if (!response.ok || !data?.success) {
+      const errorMsg =
+        data?.error?.message ||
+        data?.message ||
+        (response.status === 404
+          ? 'API route not found. Verify backend server is running.'
+          : response.status >= 500
+          ? 'Backend service error. Please verify server logs.'
+          : `Request failed with status ${response.status}`);
       const err = new Error(errorMsg);
       err.code = data?.error?.code || 'CHAT_ERROR';
       err.status = response.status;
@@ -39,6 +51,11 @@ export async function sendChatMessage(message, history = []) {
       usage: data.data?.usage || null,
     };
   } catch (error) {
+    if (error.name === 'TypeError' && (error.message.includes('fetch') || error.message.includes('network'))) {
+      const networkErr = new Error('Cannot connect to backend server. Ensure backend is running on port 5000.');
+      networkErr.code = 'BACKEND_OFFLINE';
+      throw networkErr;
+    }
     console.error('API service error [sendChatMessage]:', error);
     throw error;
   }

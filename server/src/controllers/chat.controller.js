@@ -8,7 +8,7 @@ import { successResponse, errorResponse } from '../utils/apiResponse.js';
  */
 export async function handleChatMessage(req, res, next) {
   try {
-    const { message, history } = req.body;
+    const { message, history } = req.body || {};
 
     if (!message && (!history || !Array.isArray(history) || history.length === 0)) {
       return errorResponse(

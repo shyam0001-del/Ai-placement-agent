@@ -63,13 +63,15 @@ export function useChat() {
       setError(null);
 
       // Prepare history payload for context continuity (excluding error messages)
-      const currentHistory = [...messages, userMessage].map((m) => ({
-        role: m.role,
-        content: m.content,
-      }));
+      const currentHistory = messages
+        .filter((m) => !m.isError)
+        .map((m) => ({
+          role: m.role,
+          content: m.content,
+        }));
 
       try {
-        const response = await sendChatMessage(trimmed, currentHistory.slice(0, -1));
+        const response = await sendChatMessage(trimmed, currentHistory);
 
         const assistantMsgId = `assistant-${Date.now()}`;
         const assistantMessage = {
