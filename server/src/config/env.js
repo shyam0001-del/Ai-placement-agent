@@ -27,6 +27,10 @@ export const config = {
     apiKey: process.env.WEB_SEARCH_API_KEY || '',
     engine: process.env.WEB_SEARCH_ENGINE || '',
   },
+  rateLimit: {
+    windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10),
+    maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '60', 10),
+  },
   mongodbUri: process.env.MONGODB_URI || '',
   nodeEnv: process.env.NODE_ENV || 'development',
 };

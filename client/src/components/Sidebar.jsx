@@ -53,7 +53,8 @@ export default function Sidebar({
     { name: 'Phase 5: Placement Engine', status: 'completed', desc: 'Readiness & Skill Gaps' },
     { name: 'Phase 6: Practice Engine', status: 'completed', desc: 'Mock Interviews & Evaluation' },
     { name: 'Phase 7: RAG Engine', status: 'completed', desc: 'Controlled Knowledge Base' },
-    { name: 'Phase 8: Web Intelligence', status: 'active', desc: 'Controlled Web Tools & Citations' },
+    { name: 'Phase 8: Web Intelligence', status: 'completed', desc: 'Controlled Web Tools & Citations' },
+    { name: 'Phase 9: Observability & Security', status: 'completed', desc: 'Evaluation, Metrics & Hardening' },
   ];
 
   const isDbConnected = serverStatus?.database?.connected;

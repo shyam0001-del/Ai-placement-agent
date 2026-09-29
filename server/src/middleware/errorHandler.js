@@ -1,18 +1,19 @@
 import { errorResponse } from '../utils/apiResponse.js';
+import { securityService } from '../services/security/security.service.js';
+import { config } from '../config/env.js';
 
 /**
  * Centralized error-handling middleware
  */
 export function errorHandler(err, req, res, next) {
   const statusCode = err.statusCode || (err.status && typeof err.status === 'number' ? err.status : 500);
-  const code = err.code || 'INTERNAL_ERROR';
-  const message = err.message || 'An unexpected server error occurred';
+  const sanitized = securityService.sanitizeError(err, config.nodeEnv);
 
   // Log server-side with context without exposing secrets
-  console.error(`[ERROR] [${req.method} ${req.originalUrl}] [${code}]:`, message);
+  console.error(`[ERROR] [${req.method} ${req.originalUrl}] [${sanitized.code}]:`, sanitized.message);
 
   // Return clean, standardized client error without stack trace
-  return errorResponse(res, message, statusCode, code);
+  return errorResponse(res, sanitized.message, statusCode, sanitized.code);
 }
 
 /**

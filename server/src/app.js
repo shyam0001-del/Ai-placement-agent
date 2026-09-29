@@ -11,7 +11,8 @@ import placementRoutes from './routes/placement.routes.js';
 import practiceRoutes from './routes/practice.routes.js';
 import knowledgeRoutes from './routes/knowledge.routes.js';
 import webRoutes from './routes/web.routes.js';
-import { successResponse } from './utils/apiResponse.js';
+import { successResponse, errorResponse } from './utils/apiResponse.js';
+import { metricsService } from './services/observability/metrics.service.js';
 
 const app = express();
 
@@ -45,6 +46,29 @@ app.get('/api/health', (req, res) => {
     ...(missing.length > 0 ? { missingEnv: missing } : {}),
     timestamp: new Date().toISOString(),
   });
+});
+
+// Dependency Readiness Check (Phase 9)
+app.get('/api/health/readiness', (req, res) => {
+  const { isValid: aiConfigured } = validateAiConfig();
+  const dbStatus = getDatabaseStatus();
+
+  return successResponse(res, {
+    status: 'ready',
+    database: dbStatus.connected ? 'connected' : (config.mongodbUri ? 'disconnected' : 'in-memory'),
+    aiProvider: aiConfigured ? 'configured' : 'not_configured',
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// Observability Metrics Endpoint (Development/Diagnostics) (Phase 9)
+app.get('/api/health/metrics', (req, res) => {
+  if (config.nodeEnv === 'production' && !req.headers['x-admin-key']) {
+    return errorResponse(res, 'Metrics endpoint is only accessible in development mode.', 403, 'FORBIDDEN');
+  }
+
+  const snapshot = metricsService.getMetricsSnapshot();
+  return successResponse(res, snapshot);
 });
 
 // Mount Routes
