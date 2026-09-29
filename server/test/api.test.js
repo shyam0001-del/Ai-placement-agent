@@ -8,8 +8,11 @@ import { placementIntelligenceService, READINESS_LEVELS } from '../src/services/
 import { toolRegistry } from '../src/services/tools/index.js';
 import { agentService } from '../src/services/agent/agent.service.js';
 import { getDatabaseStatus } from '../src/config/db.js';
+import { practiceService } from '../src/services/practice/practice.service.js';
+import { questionGeneratorService } from '../src/services/practice/questionGenerator.service.js';
+import { answerEvaluationService } from '../src/services/practice/answerEvaluation.service.js';
 
-describe('AI Placement Agent - Full API & Agent Test Suite (Phase 1 + 2 + 3 + 4 + 5)', () => {
+describe('AI Placement Agent - Full API & Agent Test Suite (Phase 1 + 2 + 3 + 4 + 5 + 6)', () => {
   let server;
   const TEST_PORT = 5096;
   let testUserId = '';
@@ -49,6 +52,7 @@ describe('AI Placement Agent - Full API & Agent Test Suite (Phase 1 + 2 + 3 + 4 
     });
     userService.clearMemory();
     memoryService.clearMemory();
+    practiceService.clearMemory();
   });
 
   // ==========================================
@@ -1471,6 +1475,519 @@ describe('AI Placement Agent - Full API & Agent Test Suite (Phase 1 + 2 + 3 + 4 
       aiService.generateChatResponse = originalGenerate;
     }
   });
+
+  // ==========================================
+  // PHASE 6: PRACTICE & INTERVIEW ENGINE TESTS
+  // ==========================================
+
+  it('Phase 6.1: Create practice session initializes session and first question', async () => {
+    const session = await practiceService.createSession({
+      userId: testUserId,
+      mode: 'practice',
+      role: 'Data Analyst',
+      topic: 'SQL',
+      difficulty: 'medium',
+      questionCount: 3,
+    });
+
+    assert.ok(session.id);
+    assert.strictEqual(session.userId, testUserId);
+    assert.strictEqual(session.mode, 'practice');
+    assert.strictEqual(session.topic, 'SQL');
+    assert.strictEqual(session.difficulty, 'medium');
+    assert.strictEqual(session.questionCount, 3);
+    assert.strictEqual(session.status, 'in_progress');
+    assert.ok(session.currentQuestion);
+    assert.ok(session.currentQuestion.question);
+    assert.ok(Array.isArray(session.currentQuestion.expectedConcepts));
+  });
+
+  it('Phase 6.2: Invalid mode rejects with descriptive error', async () => {
+    await assert.rejects(
+      async () => {
+        await practiceService.createSession({
+          userId: testUserId,
+          mode: 'unsupported_mode',
+          topic: 'SQL',
+        });
+      },
+      (err) => err.message.includes('Invalid practice mode')
+    );
+  });
+
+  it('Phase 6.3: Invalid difficulty rejects with descriptive error', async () => {
+    await assert.rejects(
+      async () => {
+        await practiceService.createSession({
+          userId: testUserId,
+          mode: 'practice',
+          difficulty: 'super_hard',
+        });
+      },
+      (err) => err.message.includes('Invalid difficulty')
+    );
+  });
+
+  it('Phase 6.4: Invalid question count rejects with validation error', async () => {
+    await assert.rejects(
+      async () => {
+        await practiceService.createSession({
+          userId: testUserId,
+          questionCount: 25,
+        });
+      },
+      (err) => err.message.includes('between 1 and 10')
+    );
+  });
+
+  it('Phase 6.5: Question generation returns valid structured question with expected concepts', async () => {
+    const q = await questionGeneratorService.generateQuestion({
+      role: 'Backend Developer',
+      topic: 'SQL',
+      difficulty: 'medium',
+      type: 'sql',
+    });
+
+    assert.ok(q.question);
+    assert.strictEqual(typeof q.question, 'string');
+    assert.strictEqual(q.topic, 'SQL');
+    assert.strictEqual(q.difficulty, 'medium');
+    assert.ok(['conceptual', 'coding', 'sql', 'behavioral', 'scenario'].includes(q.type));
+    assert.ok(Array.isArray(q.expectedConcepts));
+    assert.ok(q.expectedConcepts.length > 0);
+  });
+
+  it('Phase 6.6: Structured question validation handles malformed or incomplete question safely', () => {
+    const valid = questionGeneratorService.validateStructuredQuestion(
+      {
+        question: 'Explain SQL indexing mechanics.',
+        topic: 'SQL',
+        difficulty: 'medium',
+        type: 'sql',
+        expectedConcepts: ['B-Tree', 'clustering'],
+      },
+      'SQL',
+      'medium',
+      'sql'
+    );
+    assert.strictEqual(valid.topic, 'SQL');
+
+    const fallback = questionGeneratorService.validateStructuredQuestion(
+      {
+        question: 'Too short',
+      },
+      'Data Structures',
+      'hard',
+      'coding'
+    );
+    assert.strictEqual(fallback.difficulty, 'hard');
+    assert.ok(fallback.question.length > 10);
+  });
+
+  it('Phase 6.7: Retrieve session returns current state and question progress', async () => {
+    const created = await practiceService.createSession({
+      userId: testUserId,
+      mode: 'practice',
+      topic: 'React',
+      difficulty: 'easy',
+      questionCount: 2,
+    });
+
+    const retrieved = await practiceService.getSession(created.id, testUserId);
+    assert.strictEqual(retrieved.id, created.id);
+    assert.strictEqual(retrieved.currentQuestionIndex, 0);
+    assert.strictEqual(retrieved.topic, 'React');
+  });
+
+  it('Phase 6.8: Session ownership isolation rejects access from unauthorized candidate', async () => {
+    const session = await practiceService.createSession({
+      userId: testUserId,
+      topic: 'Algorithms',
+    });
+
+    await assert.rejects(
+      async () => {
+        await practiceService.getSession(session.id, 'other_candidate_id');
+      },
+      (err) => err.message.includes('Access denied') || err.message.includes('not found')
+    );
+  });
+
+  it('Phase 6.9: Submit answer evaluates response and advances session', async () => {
+    const session = await practiceService.createSession({
+      userId: testUserId,
+      mode: 'practice',
+      topic: 'SQL',
+      difficulty: 'medium',
+      questionCount: 2,
+    });
+
+    const answer =
+      'A window function performs a calculation across a set of table rows that are related to the current row without collapsing the rows like GROUP BY does. We use PARTITION BY to divide rows into partitions and ORDER BY to specify row ordering, allowing calculations like ROW_NUMBER(), RANK(), and moving averages.';
+
+    const result = await practiceService.submitAnswer({
+      sessionId: session.id,
+      userId: testUserId,
+      answer,
+    });
+
+    assert.ok(result.evaluation);
+    assert.ok(typeof result.evaluation.score === 'number');
+    assert.ok(result.evaluation.score >= 0 && result.evaluation.score <= 100);
+    assert.ok(Array.isArray(result.evaluation.strengths));
+    assert.ok(Array.isArray(result.evaluation.weaknesses));
+    assert.ok(result.evaluation.feedback);
+    assert.strictEqual(result.currentQuestionIndex, 1);
+    assert.strictEqual(result.isCompleted, false);
+    assert.ok(result.nextQuestion);
+  });
+
+  it('Phase 6.10: Structured evaluation calculates correctness, relevance, clarity, and depth', async () => {
+    const evaluation = await answerEvaluationService.evaluateAnswer({
+      question: 'What is a SQL window function and how does PARTITION BY work?',
+      expectedConcepts: ['window functions', 'partition by', 'group by vs window', 'aggregate calculation'],
+      answer:
+        'Window functions calculate aggregate values over a specific partition of rows while preserving individual row identity. PARTITION BY defines the subset boundaries.',
+      topic: 'SQL',
+      difficulty: 'medium',
+    });
+
+    assert.ok(evaluation.score >= 0 && evaluation.score <= 100);
+    assert.ok(evaluation.correctness >= 0 && evaluation.correctness <= 100);
+    assert.ok(evaluation.relevance >= 0 && evaluation.relevance <= 100);
+    assert.ok(evaluation.clarity >= 0 && evaluation.clarity <= 100);
+    assert.ok(evaluation.depth >= 0 && evaluation.depth <= 100);
+    assert.ok(typeof evaluation.feedback === 'string' && evaluation.feedback.length > 0);
+  });
+
+  it('Phase 6.11: Malformed evaluation handling gracefully validates and normalizes output without server crash', () => {
+    const malformed = {
+      score: 'eighty',
+      correctness: 150,
+      relevance: -20,
+      strengths: 'Good knowledge',
+      weaknesses: null,
+      missingConcepts: undefined,
+      feedback: 12345,
+    };
+
+    const sanitized = answerEvaluationService.validateStructuredEvaluation(malformed, ['indexing', 'b-tree']);
+
+    assert.strictEqual(sanitized.score, 50); // fallback
+    assert.strictEqual(sanitized.correctness, 100); // clamped
+    assert.strictEqual(sanitized.relevance, 0); // clamped
+    assert.ok(Array.isArray(sanitized.strengths));
+    assert.ok(Array.isArray(sanitized.weaknesses));
+    assert.ok(Array.isArray(sanitized.missingConcepts));
+    assert.strictEqual(typeof sanitized.feedback, 'string');
+  });
+
+  it('Phase 6.12: Score range validation clamps metrics strictly between 0 and 100', () => {
+    const outOfBounds = {
+      score: 999,
+      correctness: 500,
+      relevance: -100,
+      clarity: 101,
+      depth: -5,
+      strengths: ['Great syntax'],
+      weaknesses: [],
+      missingConcepts: [],
+      feedback: 'Good work',
+    };
+
+    const sanitized = answerEvaluationService.validateStructuredEvaluation(outOfBounds, []);
+
+    assert.strictEqual(sanitized.score, 100);
+    assert.strictEqual(sanitized.correctness, 100);
+    assert.strictEqual(sanitized.relevance, 0);
+    assert.strictEqual(sanitized.clarity, 100);
+    assert.strictEqual(sanitized.depth, 0);
+  });
+
+  it('Phase 6.13: Progress update after evaluation reflects practice performance into candidate progress', async () => {
+    const session = await practiceService.createSession({
+      userId: testUserId,
+      mode: 'practice',
+      topic: 'Docker Containers',
+      difficulty: 'easy',
+      questionCount: 1,
+    });
+
+    await practiceService.submitAnswer({
+      sessionId: session.id,
+      userId: testUserId,
+      answer: 'Containers isolate applications using cgroups and namespaces in Linux to ensure consistent environments.',
+    });
+
+    const user = await userService.getUserById(testUserId);
+    const dockerProgress = user.progress.find((p) => p.topic.toLowerCase().includes('docker'));
+    assert.ok(dockerProgress, 'Candidate progress should record docker practice topic');
+  });
+
+  it('Phase 6.14: Weak topic detection flags topics where practice performance is low', async () => {
+    const session = await practiceService.createSession({
+      userId: testUserId,
+      mode: 'practice',
+      topic: 'Distributed Transactions',
+      difficulty: 'hard',
+      questionCount: 1,
+    });
+
+    await practiceService.submitAnswer({
+      sessionId: session.id,
+      userId: testUserId,
+      answer: 'I do not know.',
+    });
+
+    const weakTopics = await practiceService.getWeakPracticeTopics(testUserId);
+    assert.ok(Array.isArray(weakTopics));
+    const distTrans = weakTopics.find((w) => w.topic.toLowerCase().includes('distributed transactions'));
+    assert.ok(distTrans, 'Distributed Transactions should be flagged as weak');
+    assert.ok(distTrans.averageScore < 65);
+  });
+
+  it('Phase 6.15: Adaptive next-question behavior adjusts difficulty based on score', async () => {
+    const session = await practiceService.createSession({
+      userId: testUserId,
+      mode: 'practice',
+      topic: 'SQL',
+      difficulty: 'medium',
+      questionCount: 3,
+    });
+
+    // Score low on question 1
+    const result1 = await practiceService.submitAnswer({
+      sessionId: session.id,
+      userId: testUserId,
+      answer: 'Not sure.',
+    });
+
+    assert.strictEqual(result1.nextQuestion.difficulty, 'easy', 'Should adapt down to easy on poor performance');
+
+    // Score high on question 2 covering expected concepts
+    const concepts = result1.nextQuestion.expectedConcepts || ['window functions', 'partition by'];
+    const answer2 = `This concept covers ${concepts.join(' and ')} in technical depth, ensuring optimized query performance, proper indexing, and efficient calculation across partitions without collapsing table rows.`;
+
+    const result2 = await practiceService.submitAnswer({
+      sessionId: session.id,
+      userId: testUserId,
+      answer: answer2,
+    });
+
+    assert.ok(
+      ['medium', 'hard'].includes(result2.nextQuestion.difficulty),
+      'Should adapt difficulty up following strong performance'
+    );
+  });
+
+  it('Phase 6.16: Complete session calculates overall score and summary diagnostics', async () => {
+    const session = await practiceService.createSession({
+      userId: testUserId,
+      mode: 'practice',
+      topic: 'System Design',
+      difficulty: 'medium',
+      questionCount: 1,
+    });
+
+    await practiceService.submitAnswer({
+      sessionId: session.id,
+      userId: testUserId,
+      answer:
+        'Caching stores frequently accessed data in fast-access memory like Redis to reduce database read latency. Common eviction policies include LRU and LFU.',
+    });
+
+    const completed = await practiceService.completeSession(session.id, testUserId);
+
+    assert.strictEqual(completed.status, 'completed');
+    assert.ok(completed.summary);
+    assert.ok(typeof completed.summary.averageScore === 'number');
+    assert.ok(Array.isArray(completed.summary.strongAreas));
+    assert.ok(Array.isArray(completed.summary.weakAreas));
+    assert.ok(typeof completed.summary.recommendations === 'string');
+  });
+
+  it('Phase 6.17: Practice history retrieves recent sessions for candidate', async () => {
+    const history = await practiceService.getPracticeHistory(testUserId, { limit: 5 });
+    assert.ok(Array.isArray(history));
+    assert.ok(history.length > 0);
+    assert.strictEqual(history[0].userId, testUserId);
+  });
+
+  it('Phase 6.18: Practice weak topics aggregates across historical sessions', async () => {
+    const weakTopics = await practiceService.getWeakPracticeTopics(testUserId);
+    assert.ok(Array.isArray(weakTopics));
+  });
+
+  it('Phase 6.19: User isolation ensures Candidate A cannot view or answer Candidate B sessions', async () => {
+    const candidateB = await userService.createUser({
+      name: 'Aditi Sharma',
+      email: 'aditi.sharma@example.com',
+      degree: 'B.Tech CS',
+      skills: [{ name: 'Java', level: 'intermediate' }],
+      targetRole: 'Software Engineer',
+    });
+
+    const sessionA = await practiceService.createSession({
+      userId: testUserId,
+      topic: 'Java',
+      questionCount: 2,
+    });
+
+    // Candidate B tries to submit answer to Candidate A's session
+    await assert.rejects(
+      async () => {
+        await practiceService.submitAnswer({
+          sessionId: sessionA.id,
+          userId: candidateB.id,
+          answer: 'Some answer',
+        });
+      },
+      (err) => err.message.includes('Access denied') || err.message.includes('not found')
+    );
+  });
+
+  it('Phase 6.20: Agent start_practice_session tool creates practice session', async () => {
+    const result = await toolRegistry.executeTool('start_practice_session', {
+      userId: testUserId,
+      mode: 'technical_interview',
+      role: 'Data Analyst',
+      topic: 'SQL',
+      difficulty: 'medium',
+      questionCount: 3,
+    });
+
+    assert.strictEqual(result.success, true);
+    assert.ok(result.data.sessionId);
+    assert.strictEqual(result.data.topic, 'SQL');
+    assert.ok(result.data.currentQuestion);
+  });
+
+  it('Phase 6.21: Agent submit_practice_answer tool evaluates and returns feedback', async () => {
+    const startResult = await toolRegistry.executeTool('start_practice_session', {
+      userId: testUserId,
+      topic: 'SQL',
+      questionCount: 2,
+    });
+
+    const submitResult = await toolRegistry.executeTool('submit_practice_answer', {
+      userId: testUserId,
+      sessionId: startResult.data.sessionId,
+      answer:
+        'A window function performs calculations across a set of table rows that are related to the current row without collapsing rows like GROUP BY. It uses PARTITION BY and ORDER BY clauses.',
+    });
+
+    assert.strictEqual(submitResult.success, true);
+    assert.ok(submitResult.data.evaluation);
+    assert.ok(submitResult.data.evaluation.score >= 0);
+  });
+
+  it('Phase 6.22: Agent get_practice_session tool retrieves active session state', async () => {
+    const startResult = await toolRegistry.executeTool('start_practice_session', {
+      userId: testUserId,
+      topic: 'Data Structures',
+      questionCount: 2,
+    });
+
+    const getResult = await toolRegistry.executeTool('get_practice_session', {
+      userId: testUserId,
+      sessionId: startResult.data.sessionId,
+    });
+
+    assert.strictEqual(getResult.success, true);
+    assert.strictEqual(getResult.data.id, startResult.data.sessionId);
+    assert.strictEqual(getResult.data.topic, 'Data Structures');
+  });
+
+  it('Phase 6.23: Agent complete_practice_session tool concludes session', async () => {
+    const startResult = await toolRegistry.executeTool('start_practice_session', {
+      userId: testUserId,
+      topic: 'Algorithms',
+      questionCount: 1,
+    });
+
+    const completeResult = await toolRegistry.executeTool('complete_practice_session', {
+      userId: testUserId,
+      sessionId: startResult.data.sessionId,
+    });
+
+    assert.strictEqual(completeResult.success, true);
+    assert.strictEqual(completeResult.data.status, 'completed');
+    assert.ok(completeResult.data.summary);
+  });
+
+  it('Phase 6.24: REST API development endpoints function properly with ownership checks', async () => {
+    // 1. POST /api/practice/sessions
+    const createRes = await fetch(`http://localhost:${TEST_PORT}/api/practice/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: testUserId,
+        mode: 'practice',
+        topic: 'Database Indexes',
+        difficulty: 'medium',
+        questionCount: 2,
+      }),
+    });
+    assert.strictEqual(createRes.status, 201);
+    const createData = await createRes.json();
+    assert.strictEqual(createData.success, true);
+    const sessionId = createData.data.id;
+
+    // 2. GET /api/practice/sessions/:sessionId
+    const getRes = await fetch(
+      `http://localhost:${TEST_PORT}/api/practice/sessions/${sessionId}?userId=${testUserId}`
+    );
+    assert.strictEqual(getRes.status, 200);
+    const getData = await getRes.json();
+    assert.strictEqual(getData.data.topic, 'Database Indexes');
+
+    // 3. POST /api/practice/sessions/:sessionId/answer
+    const answerRes = await fetch(
+      `http://localhost:${TEST_PORT}/api/practice/sessions/${sessionId}/answer`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: testUserId,
+          answer:
+            'A B-Tree index provides logarithmic lookup, insertion, and deletion times. A clustered index determines the physical order of data in the table, while non-clustered indexes create a separate pointer structure.',
+        }),
+      }
+    );
+    assert.strictEqual(answerRes.status, 200);
+    const answerData = await answerRes.json();
+    assert.ok(answerData.data.evaluation);
+
+    // 4. POST /api/practice/sessions/:sessionId/complete
+    const completeRes = await fetch(
+      `http://localhost:${TEST_PORT}/api/practice/sessions/${sessionId}/complete`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: testUserId }),
+      }
+    );
+    assert.strictEqual(completeRes.status, 200);
+    const completeData = await completeRes.json();
+    assert.strictEqual(completeData.data.status, 'completed');
+
+    // 5. GET /api/users/:userId/practice-history
+    const historyRes = await fetch(
+      `http://localhost:${TEST_PORT}/api/users/${testUserId}/practice-history?limit=3`
+    );
+    assert.strictEqual(historyRes.status, 200);
+    const historyData = await historyRes.json();
+    assert.ok(Array.isArray(historyData.data));
+
+    // 6. GET /api/users/:userId/practice-weak-topics
+    const weakRes = await fetch(
+      `http://localhost:${TEST_PORT}/api/users/${testUserId}/practice-weak-topics`
+    );
+    assert.strictEqual(weakRes.status, 200);
+    const weakData = await weakRes.json();
+    assert.ok(Array.isArray(weakData.data));
+  });
 });
+
 
 

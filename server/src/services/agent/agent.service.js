@@ -41,7 +41,8 @@ export class AgentService {
       '3. NEVER save casual greetings, one-off questions, or conversational filler as memory. ' +
       '4. Use "delete_memory" if the user explicitly asks to forget or remove a remembered fact. ' +
       '5. Placement Intelligence: When the user asks about role readiness, skill gaps, or preparation priorities ("Am I ready for Data Analyst?", "What skills am I missing?", "What should I focus on first?"), invoke "analyze_placement_readiness" or "get_skill_gap_analysis". When asked about the required skills for a role ("What skills are required for Data Scientist?"), call "get_role_requirements". ' +
-      '6. If the request is a general question, conceptual explanation, or greeting, answer directly without invoking tools.';
+      '6. Practice & Mock Interviews: When the user asks for practice, mock interviews, or question evaluation ("Give me a SQL practice session", "Interview me for a Data Analyst role", "Practice with me", "Test my knowledge"), use "start_practice_session". If no topic is specified, you can inspect their highest priority skill gaps first using "get_skill_gap_analysis". Submit answers using "submit_practice_answer" and finish sessions using "complete_practice_session". Retrieve history with "get_practice_history" or check recurring trouble spots with "get_weak_practice_topics". ' +
+      '7. If the request is a general question, conceptual explanation, or greeting, answer directly without invoking tools.';
 
     if (userId) {
       systemPrompt += `\n\nActive Candidate Context:\nThe current candidate's userId is "${userId}". Always pass this userId when calling candidate tools.`;
@@ -134,6 +135,12 @@ export class AgentService {
             'save_memory',
             'analyze_placement_readiness',
             'get_skill_gap_analysis',
+            'start_practice_session',
+            'submit_practice_answer',
+            'get_practice_session',
+            'complete_practice_session',
+            'get_practice_history',
+            'get_weak_practice_topics',
           ];
           if (userId && !toolArgs.userId && userIdTools.includes(toolName)) {
             toolArgs.userId = userId;

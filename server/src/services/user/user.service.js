@@ -285,6 +285,13 @@ class UserService {
   }
 
   /**
+   * Helper alias for updating candidate preparation progress
+   */
+  async updateProgress({ userId, topic, status, notes = '' }) {
+    return this.updateUserProgress(userId, { topic, status, notes });
+  }
+
+  /**
    * Clear in-memory users (for test isolation)
    */
   clearMemory() {

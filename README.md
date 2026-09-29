@@ -207,9 +207,50 @@ $$\text{Readiness Score} = \text{clamp}\left(\frac{\sum (\text{weight} \times \t
 - `GET /api/placement/roles/:role`: Get required skills for a role
 - `GET /api/users/:userId/placement-analysis`: Retrieve placement intelligence analysis
 
+### Practice & Interview Engine (Phase 6)
+- `POST /api/practice/sessions`: Start new practice or mock interview session
+- `GET /api/practice/sessions/:sessionId?userId=...`: Retrieve session state and current question
+- `POST /api/practice/sessions/:sessionId/answer`: Submit answer, receive semantic evaluation, and advance
+- `POST /api/practice/sessions/:sessionId/complete`: Conclude session and generate diagnostic summary
+- `GET /api/users/:userId/practice-history`: Retrieve historical practice sessions
+- `GET /api/users/:userId/practice-weak-topics`: Retrieve aggregated topics requiring review
+
 ---
 
-## 7. Multi-Phase Roadmap
+## 7. Phase 6: Practice & Interview Evaluation Engine
+
+### Architecture & Principles
+The Practice Engine elevates the placement agent from analysis into active interview training.
+- **Model vs Engine Separation:** The LLM generates creative explanations, questions, and evaluation reasoning, but backend services strictly validate and normalize all structured data.
+- **Deterministic Evaluation Fallback:** Operates with or without an active OpenAI API key using robust concept analysis.
+- **Adaptive Difficulty:** Automatically challenges candidates when answers score $\ge 80/100$ and provides scaffolded reinforcement when scores are $< 50/100$.
+- **Progress & Memory Synchronization:** Practice results update candidate preparation topics (Phase 3) and record persistent weaknesses or breakthrough achievements into long-term memory (Phase 4).
+- **Placement Intelligence Integration:** Integrates with Phase 5 gap analysis to automatically target high-priority missing skills for practice.
+
+### Registered Agent Tools (16 Tools Total)
+1. `get_user_profile`
+2. `get_user_progress`
+3. `update_user_progress`
+4. `get_relevant_memories`
+5. `save_memory`
+6. `update_memory`
+7. `delete_memory`
+8. `get_role_requirements`
+9. `analyze_placement_readiness`
+10. `get_skill_gap_analysis`
+11. `start_practice_session`
+12. `submit_practice_answer`
+13. `get_practice_session`
+14. `complete_practice_session`
+15. `get_practice_history`
+16. `get_weak_practice_topics`
+
+### Important Disclaimer
+> **Notice:** Practice scores are preparation feedback, not hiring predictions. Evaluator scores and recommendations are designed strictly to guide active self-study and mock interview readiness.
+
+---
+
+## 8. Multi-Phase Roadmap
 
 | Phase | Milestone | Description | Status |
 |---|---|---|---|
@@ -218,20 +259,19 @@ $$\text{Readiness Score} = \text{clamp}\left(\frac{\sum (\text{weight} \times \t
 | **Phase 3** | **Tool Calling & Agent Loop**| Controlled agent loop, tool registry, profile & progress tools | **COMPLETED** |
 | **Phase 4** | **Structured Memory** | Short-term context pruning + long-term explicit student memory | **COMPLETED** |
 | **Phase 5** | **Placement Intelligence** | Deterministic gap analysis, role benchmarking, readiness indicator | **COMPLETED** |
-| **Phase 6** | **Question Generation** | Categorized DSA, SQL, ML, System Design, and Behavioral drills | *Upcoming* |
-| **Phase 7** | **Answer Evaluation** | Rubric-based scoring, missing concepts, structured feedback | *Upcoming* |
-| **Phase 8** | **RAG Pipeline** | Resume & notes ingestion, vector embeddings, grounded retrieval | *Upcoming* |
-| **Phase 9** | **Live Web Tools** | Current company tech stacks, hiring trends, job post analysis | *Upcoming* |
-| **Phase 10**| **Evaluation & Quality**| Automated test benchmark, token tracking, agent guardrails | *Upcoming* |
+| **Phase 6** | **Practice & Interview Engine** | Mock interview sessions, semantic answer evaluation, adaptive difficulty | **COMPLETED** |
+| **Phase 7** | **RAG Pipeline** | Resume & notes ingestion, vector embeddings, grounded retrieval | *Upcoming* |
+| **Phase 8** | **Live Web Tools** | Current company tech stacks, hiring trends, job post analysis | *Upcoming* |
+| **Phase 9** | **Evaluation & Quality** | Automated test benchmark, token tracking, agent guardrails | *Upcoming* |
 
 ---
 
-## 8. Verification & Testing
+## 9. Verification & Testing
 
 Run the full end-to-end verification suite across all phases:
 
 ```bash
-# Run server test suite (54/54 automated tests across Phases 1-5)
+# Run server test suite (78/78 automated tests across Phases 1-6)
 npm run test:server
 
 # Run client linter (Oxlint)
@@ -240,4 +280,5 @@ npm run lint:client
 # Run client production build (Vite)
 npm run build:client
 ```
+
 

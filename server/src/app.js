@@ -8,6 +8,7 @@ import chatRoutes from './routes/chat.routes.js';
 import userRoutes from './routes/user.routes.js';
 import memoryRoutes from './routes/memory.routes.js';
 import placementRoutes from './routes/placement.routes.js';
+import practiceRoutes from './routes/practice.routes.js';
 import { successResponse } from './utils/apiResponse.js';
 
 const app = express();
@@ -49,6 +50,7 @@ app.use('/api', chatRoutes);
 app.use('/api', userRoutes);
 app.use('/api', memoryRoutes);
 app.use('/api', placementRoutes);
+app.use('/api', practiceRoutes);
 
 // 404 & Centralized Error Handlers
 app.use(notFoundHandler);

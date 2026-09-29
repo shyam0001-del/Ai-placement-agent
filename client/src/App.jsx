@@ -5,13 +5,14 @@ import ChatArea from './components/ChatArea';
 import ChatInput from './components/ChatInput';
 import ProfileView from './components/ProfileView';
 import PlacementIntelligenceView from './components/PlacementIntelligenceView';
+import PracticeView from './components/PracticeView';
 import { useChat } from './hooks/useChat';
 import { useProfile } from './hooks/useProfile';
 
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [inputValue, setInputValue] = useState('');
-  const [activeTab, setActiveTab] = useState('chat'); // 'chat' | 'profile' | 'placement'
+  const [activeTab, setActiveTab] = useState('chat'); // 'chat' | 'profile' | 'placement' | 'practice'
 
   const {
     profile,
@@ -104,6 +105,15 @@ export default function App() {
 
         {activeTab === 'placement' && (
           <PlacementIntelligenceView
+            activeUserId={activeUserId}
+            activeProfile={profile}
+            onStartChatWithPrompt={handleSelectPrompt}
+            onNavigateToProfile={() => setActiveTab('profile')}
+          />
+        )}
+
+        {activeTab === 'practice' && (
+          <PracticeView
             activeUserId={activeUserId}
             activeProfile={profile}
             onStartChatWithPrompt={handleSelectPrompt}

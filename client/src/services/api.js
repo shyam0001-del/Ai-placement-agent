@@ -271,4 +271,134 @@ export async function fetchPlacementAnalysis(userId, role = null) {
   return data.data;
 }
 
+/**
+ * ========================================================
+ * PHASE 6: PRACTICE & INTERVIEW EVALUATION API
+ * ========================================================
+ */
+
+/**
+ * Start a new practice or mock interview session
+ * @param {Object} params
+ * @param {string} params.userId
+ * @param {string} [params.mode]
+ * @param {string} [params.role]
+ * @param {string} [params.topic]
+ * @param {string} [params.difficulty]
+ * @param {number} [params.questionCount]
+ */
+export async function createPracticeSession(params) {
+  const response = await fetch(`${API_BASE}/practice/sessions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.success) {
+    const err = new Error(data?.error?.message || 'Failed to start practice session');
+    err.code = data?.error?.code || 'PRACTICE_CREATE_ERROR';
+    throw err;
+  }
+  return data.data;
+}
+
+/**
+ * Fetch a practice session by ID
+ * @param {string} sessionId
+ * @param {string} userId
+ */
+export async function fetchPracticeSession(sessionId, userId) {
+  if (!sessionId || !userId) return null;
+  const response = await fetch(
+    `${API_BASE}/practice/sessions/${encodeURIComponent(sessionId)}?userId=${encodeURIComponent(userId)}`
+  );
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.success) {
+    const err = new Error(data?.error?.message || 'Failed to fetch practice session');
+    err.code = data?.error?.code || 'PRACTICE_FETCH_ERROR';
+    throw err;
+  }
+  return data.data;
+}
+
+/**
+ * Submit an answer for the current question
+ * @param {string} sessionId
+ * @param {string} userId
+ * @param {string} answer
+ */
+export async function submitPracticeAnswer(sessionId, userId, answer) {
+  const response = await fetch(`${API_BASE}/practice/sessions/${encodeURIComponent(sessionId)}/answer`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, answer }),
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.success) {
+    const err = new Error(data?.error?.message || 'Failed to submit practice answer');
+    err.code = data?.error?.code || 'PRACTICE_ANSWER_ERROR';
+    throw err;
+  }
+  return data.data;
+}
+
+/**
+ * Complete a practice session and retrieve performance summary
+ * @param {string} sessionId
+ * @param {string} userId
+ */
+export async function completePracticeSession(sessionId, userId) {
+  const response = await fetch(`${API_BASE}/practice/sessions/${encodeURIComponent(sessionId)}/complete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId }),
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.success) {
+    const err = new Error(data?.error?.message || 'Failed to complete practice session');
+    err.code = data?.error?.code || 'PRACTICE_COMPLETE_ERROR';
+    throw err;
+  }
+  return data.data;
+}
+
+/**
+ * Fetch practice history for active candidate
+ * @param {string} userId
+ * @param {Object} [options]
+ */
+export async function fetchPracticeHistory(userId, options = {}) {
+  if (!userId) return [];
+  const query = new URLSearchParams();
+  if (options.limit) query.append('limit', options.limit);
+  if (options.mode) query.append('mode', options.mode);
+
+  const url = `${API_BASE}/users/${encodeURIComponent(userId)}/practice-history?${query.toString()}`;
+  const response = await fetch(url);
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.success) {
+    const err = new Error(data?.error?.message || 'Failed to fetch practice history');
+    err.code = data?.error?.code || 'PRACTICE_HISTORY_ERROR';
+    throw err;
+  }
+  return data.data || [];
+}
+
+/**
+ * Fetch weak practice topics for active candidate
+ * @param {string} userId
+ */
+export async function fetchPracticeWeakTopics(userId) {
+  if (!userId) return [];
+  const response = await fetch(`${API_BASE}/users/${encodeURIComponent(userId)}/practice-weak-topics`);
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.success) {
+    const err = new Error(data?.error?.message || 'Failed to fetch weak practice topics');
+    err.code = data?.error?.code || 'PRACTICE_WEAK_TOPICS_ERROR';
+    throw err;
+  }
+  return data.data || [];
+}
+
+
 

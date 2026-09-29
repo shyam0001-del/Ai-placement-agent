@@ -8,6 +8,12 @@ import { deleteMemoryTool } from './deleteMemory.tool.js';
 import { getRoleRequirementsTool } from './getRoleRequirements.tool.js';
 import { analyzePlacementReadinessTool } from './analyzePlacementReadiness.tool.js';
 import { getSkillGapAnalysisTool } from './getSkillGapAnalysis.tool.js';
+import { startPracticeSessionTool } from './startPracticeSession.tool.js';
+import { submitPracticeAnswerTool } from './submitPracticeAnswer.tool.js';
+import { getPracticeSessionTool } from './getPracticeSession.tool.js';
+import { completePracticeSessionTool } from './completePracticeSession.tool.js';
+import { getPracticeHistoryTool } from './getPracticeHistory.tool.js';
+import { getWeakPracticeTopicsTool } from './getWeakPracticeTopics.tool.js';
 
 class ToolRegistry {
   constructor() {
@@ -22,6 +28,12 @@ class ToolRegistry {
     this.register(getRoleRequirementsTool);
     this.register(analyzePlacementReadinessTool);
     this.register(getSkillGapAnalysisTool);
+    this.register(startPracticeSessionTool);
+    this.register(submitPracticeAnswerTool);
+    this.register(getPracticeSessionTool);
+    this.register(completePracticeSessionTool);
+    this.register(getPracticeHistoryTool);
+    this.register(getWeakPracticeTopicsTool);
   }
 
   /**
