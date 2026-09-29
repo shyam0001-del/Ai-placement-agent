@@ -22,9 +22,10 @@ async function bootstrap() {
     console.log(`📡 URL: http://localhost:${PORT}`);
     console.log(`🔍 Environment: ${config.nodeEnv}`);
 
-    const { isValid, missing } = validateAiConfig();
+    const { isValid, missing, provider } = validateAiConfig();
+    const activeModel = provider === 'gemini' ? config.gemini.model : config.openai.model;
     if (isValid) {
-      console.log(`🤖 AI Engine: Ready (Model: ${config.openai.model})`);
+      console.log(`🤖 AI Engine: Ready (Provider: ${provider}, Model: ${activeModel})`);
     } else {
       console.warn(`⚠️  AI Warning: Missing config: ${missing.join(', ')}`);
       console.warn(`👉 Please set them in server/.env before calling /api/chat`);

@@ -1,144 +1,57 @@
-import OpenAI from 'openai';
 import { config, validateAiConfig } from '../../config/env.js';
+import { GeminiProvider } from './providers/gemini.provider.js';
+import { OpenAiProvider } from './providers/openai.provider.js';
 
+/**
+ * Provider-Agnostic AI Service
+ * Delegates text and tool-calling generations to the configured provider (Gemini or OpenAI).
+ */
 class AiService {
   constructor() {
-    this.client = null;
+    this.geminiProvider = new GeminiProvider();
+    this.openaiProvider = new OpenAiProvider();
   }
 
   /**
-   * Lazily initialize or retrieve the OpenAI client instance
+   * Retrieve active provider instance based on config.aiProvider
+   * @returns {GeminiProvider|OpenAiProvider}
+   */
+  getProvider() {
+    const providerName = (config.aiProvider || 'gemini').toLowerCase();
+    if (providerName === 'gemini') {
+      return this.geminiProvider;
+    }
+    if (providerName === 'openai') {
+      return this.openaiProvider;
+    }
+
+    const err = new Error(
+      `Unsupported AI provider: "${config.aiProvider}". Configured options are "gemini" or "openai".`
+    );
+    err.code = 'CONFIG_MISSING';
+    err.statusCode = 500;
+    throw err;
+  }
+
+  /**
+   * Lazily initialize or retrieve the active provider's client
    */
   getClient() {
-    const { isValid, missing } = validateAiConfig();
-    if (!isValid) {
-      const err = new Error(
-        `AI configuration missing: ${missing.join(', ')}. Please configure your .env file with OPENAI_API_KEY and OPENAI_MODEL.`
-      );
-      err.code = 'CONFIG_MISSING';
-      err.statusCode = 500;
-      throw err;
-    }
-
-    if (!this.client) {
-      const clientOptions = {
-        apiKey: config.openai.apiKey,
-      };
-
-      if (config.openai.baseURL) {
-        clientOptions.baseURL = config.openai.baseURL;
-      }
-
-      this.client = new OpenAI(clientOptions);
-    }
-
-    return this.client;
+    return this.getProvider().getClient();
   }
 
   /**
-   * Send a chat message or messages array to the configured LLM
+   * Send a chat message or messages array to the active provider
    * @param {string|Array<{role: string, content: string}>} input - user message string or history array
-   * @param {Object} options - additional options (systemPrompt, temperature, etc.)
-   * @returns {Promise<{message: string, model: string, usage: Object}>}
+   * @param {Object} options - additional options (systemPrompt, tools, temperature, etc.)
+   * @returns {Promise<{message: string, model: string, usage: Object, toolCalls: Array}>}
    */
   async generateChatResponse(input, options = {}) {
-    const client = this.getClient();
-    const model = config.openai.model;
-
-    const defaultSystemPrompt =
-      'You are the AI Placement Agent, an intelligent, empathetic, and rigorous placement and interview preparation assistant for engineering students and tech candidates. ' +
-      'Your mission is to help candidates crack their target roles (Software Engineering, Data Science, Data Analyst, ML, DevOps, Product, etc.). ' +
-      'Provide structured, clear, and actionable advice. When explaining technical concepts, use concise explanations, clear examples, and best-practice frameworks. ' +
-      'Maintain an encouraging, highly professional tone.';
-
-    let systemPromptContent = options.systemPrompt || defaultSystemPrompt;
-    if (options.profileContext) {
-      systemPromptContent += `\n\n${options.profileContext}\nTailor your guidance, questions, and roadmaps to this candidate's background, target role, and focus areas.`;
-    }
-
-    let messages = [];
-
-    if (Array.isArray(input)) {
-      // If already a message array, ensure system prompt is present
-      const hasSystem = input.some((m) => m.role === 'system');
-      if (!hasSystem) {
-        messages = [
-          { role: 'system', content: systemPromptContent },
-          ...input,
-        ];
-      } else {
-        messages = input;
-      }
-    } else if (typeof input === 'string') {
-      messages = [
-        { role: 'system', content: systemPromptContent },
-        { role: 'user', content: input },
-      ];
-    } else {
-      const err = new Error('Invalid input: message must be a string or an array of messages');
-      err.code = 'INVALID_INPUT';
-      err.statusCode = 400;
-      throw err;
-    }
-
-    try {
-      const completionPayload = {
-        model,
-        messages,
-        temperature: options.temperature ?? 0.7,
-        max_tokens: options.maxTokens ?? 2048,
-      };
-
-      if (Array.isArray(options.tools) && options.tools.length > 0) {
-        completionPayload.tools = options.tools;
-        if (options.toolChoice) {
-          completionPayload.tool_choice = options.toolChoice;
-        }
-      }
-
-      const response = await client.chat.completions.create(completionPayload);
-      const choiceMessage = response.choices?.[0]?.message || {};
-      const replyContent = choiceMessage.content ? choiceMessage.content.trim() : '';
-
-      return {
-        message: replyContent,
-        rawMessage: choiceMessage,
-        toolCalls: choiceMessage.tool_calls || null,
-        model: response.model || model,
-        usage: response.usage || null,
-      };
-    } catch (error) {
-      console.error('LLM API error:', error?.message || error);
-
-      let statusCode = 502;
-      let code = 'AI_SERVICE_ERROR';
-      let message = error?.message || 'Error communicating with AI service';
-
-      if (typeof error?.status === 'number' && error.status >= 400 && error.status < 600) {
-        statusCode = error.status;
-      }
-
-      if (error?.status === 401 || error?.code === 'invalid_api_key') {
-        statusCode = 401;
-        code = 'INVALID_API_KEY';
-        message = 'Invalid API key provided. Please check OPENAI_API_KEY in your server/.env file.';
-      } else if (error?.status === 404 || error?.code === 'model_not_found') {
-        statusCode = 404;
-        code = 'MODEL_NOT_FOUND';
-        message = `The configured model "${model}" was not found or is not accessible with this API key.`;
-      } else if (error?.status === 429) {
-        statusCode = 429;
-        code = 'RATE_LIMIT_EXCEEDED';
-        message = 'AI rate limit exceeded or quota exhausted. Please check your provider account.';
-      }
-
-      const err = new Error(message);
-      err.code = code;
-      err.statusCode = statusCode;
-      throw err;
-    }
+    const provider = this.getProvider();
+    return provider.generateChatResponse(input, options);
   }
 }
 
 // Export singleton instance
 export const aiService = new AiService();
+export { GeminiProvider, OpenAiProvider };

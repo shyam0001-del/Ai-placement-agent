@@ -30,6 +30,15 @@ import { securityService } from '../src/services/security/security.service.js';
 import { metricsService } from '../src/services/observability/metrics.service.js';
 import { traceService } from '../src/services/observability/trace.service.js';
 import { rateLimiter } from '../src/middleware/rateLimiter.js';
+import {
+  GeminiProvider,
+  adaptToolsToGemini,
+  adaptMessagesToGemini,
+  normalizeGeminiResponse,
+  normalizeGeminiError,
+} from '../src/services/ai/providers/gemini.provider.js';
+import { OpenAiProvider } from '../src/services/ai/providers/openai.provider.js';
+import { config, validateAiConfig } from '../src/config/env.js';
 
 describe('AI Placement Agent - Full API & Agent Test Suite (Phase 1 through Phase 9)', () => {
   let server;
@@ -3260,6 +3269,230 @@ Paragraph 3: Eventual consistency allows replicas to diverge temporarily as long
     // Phase 8: Web Search
     const webResult = await webSearchService.search({ query: 'Current placement trends 2026', limit: 1 });
     assert.ok(webResult.results.length > 0);
+  });
+
+  // ==============================================================
+  // GEMINI AI PROVIDER MIGRATION TESTS
+  // ==============================================================
+
+  // 1. Gemini configuration loading
+  it('Gemini Provider 1: Configuration loads with Gemini as active provider', () => {
+    assert.strictEqual(config.aiProvider, 'gemini');
+    assert.ok(config.gemini);
+    assert.ok(config.gemini.model);
+    const { provider } = validateAiConfig();
+    assert.strictEqual(provider, 'gemini');
+  });
+
+  // 2. Missing Gemini API key
+  it('Gemini Provider 2: Missing Gemini API key triggers CONFIG_MISSING error', () => {
+    const originalKey = config.gemini.apiKey;
+    try {
+      config.gemini.apiKey = '';
+      const validation = validateAiConfig();
+      assert.strictEqual(validation.isValid, false);
+      assert.ok(validation.missing.includes('GEMINI_API_KEY'));
+
+      const provider = new GeminiProvider();
+      assert.throws(
+        () => provider.getClient(),
+        (err) => err.code === 'CONFIG_MISSING' && err.statusCode === 500
+      );
+    } finally {
+      config.gemini.apiKey = originalKey;
+    }
+  });
+
+  // 3. Missing Gemini model
+  it('Gemini Provider 3: Missing Gemini model triggers CONFIG_MISSING error', () => {
+    const originalModel = config.gemini.model;
+    const originalKey = config.gemini.apiKey;
+    try {
+      config.gemini.apiKey = 'dummy-key';
+      config.gemini.model = '';
+      const validation = validateAiConfig();
+      assert.strictEqual(validation.isValid, false);
+      assert.ok(validation.missing.includes('GEMINI_MODEL'));
+
+      const provider = new GeminiProvider();
+      assert.throws(
+        () => provider.getClient(),
+        (err) => err.code === 'CONFIG_MISSING' && err.statusCode === 500
+      );
+    } finally {
+      config.gemini.model = originalModel;
+      config.gemini.apiKey = originalKey;
+    }
+  });
+
+  // 4. Gemini response normalization
+  it('Gemini Provider 4: Response normalization formats text, model, and message structures', () => {
+    const mockRaw = {
+      text: 'Data analysts collect, clean, and study data sets to help solve business problems.',
+      candidates: [{ finishReason: 'STOP' }],
+    };
+
+    const normalized = normalizeGeminiResponse(mockRaw, 'gemini-2.5-flash');
+    assert.strictEqual(normalized.message, mockRaw.text);
+    assert.strictEqual(normalized.model, 'gemini-2.5-flash');
+    assert.strictEqual(normalized.toolCalls, null);
+    assert.strictEqual(normalized.rawMessage.role, 'assistant');
+    assert.strictEqual(normalized.rawMessage.content, mockRaw.text);
+  });
+
+  // 5. Gemini tool-call normalization
+  it('Gemini Provider 5: Function calls are normalized into standard OpenAI-compatible toolCall format', () => {
+    const mockRaw = {
+      text: '',
+      functionCalls: [
+        {
+          id: 'call_test_1',
+          name: 'get_user_profile',
+          args: { userId: 'usr_rohan_001' },
+        },
+      ],
+    };
+
+    const normalized = normalizeGeminiResponse(mockRaw, 'gemini-2.5-flash');
+    assert.ok(Array.isArray(normalized.toolCalls));
+    assert.strictEqual(normalized.toolCalls.length, 1);
+    assert.strictEqual(normalized.toolCalls[0].id, 'call_test_1');
+    assert.strictEqual(normalized.toolCalls[0].type, 'function');
+    assert.strictEqual(normalized.toolCalls[0].function.name, 'get_user_profile');
+  });
+
+  // 6. Gemini tool arguments & schema adapter
+  it('Gemini Provider 6: Tool schema adapter and arguments are cleanly translated between formats', () => {
+    const rawToolDefs = [
+      {
+        type: 'function',
+        function: {
+          name: 'search_knowledge',
+          description: 'Search RAG knowledge base',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: 'Search term' },
+              limit: { type: 'number' },
+            },
+            required: ['query'],
+          },
+        },
+      },
+    ];
+
+    const geminiTools = adaptToolsToGemini(rawToolDefs);
+    assert.ok(Array.isArray(geminiTools));
+    assert.strictEqual(geminiTools.length, 1);
+    assert.ok(geminiTools[0].functionDeclarations);
+    assert.strictEqual(geminiTools[0].functionDeclarations[0].name, 'search_knowledge');
+    assert.deepStrictEqual(geminiTools[0].functionDeclarations[0].parameters.required, ['query']);
+
+    // Check stringified arguments normalization
+    const mockRaw = {
+      text: '',
+      functionCalls: [
+        {
+          name: 'search_knowledge',
+          args: { query: 'SQL window functions', limit: 2 },
+        },
+      ],
+    };
+    const normalized = normalizeGeminiResponse(mockRaw, 'gemini-2.5-flash');
+    const parsed = JSON.parse(normalized.toolCalls[0].function.arguments);
+    assert.strictEqual(parsed.query, 'SQL window functions');
+    assert.strictEqual(parsed.limit, 2);
+  });
+
+  // 7. Gemini usage metadata
+  it('Gemini Provider 7: Usage metadata captures prompt, completion, and total tokens', () => {
+    const mockRaw = {
+      text: 'Response text',
+      usageMetadata: {
+        promptTokenCount: 142,
+        candidatesTokenCount: 48,
+        totalTokenCount: 190,
+      },
+    };
+
+    const normalized = normalizeGeminiResponse(mockRaw, 'gemini-2.5-flash');
+    assert.deepStrictEqual(normalized.usage, {
+      promptTokens: 142,
+      completionTokens: 48,
+      totalTokens: 190,
+    });
+
+    const noUsage = normalizeGeminiResponse({ text: 'No usage' }, 'gemini-2.5-flash');
+    assert.strictEqual(noUsage.usage, null);
+  });
+
+  // 8. Gemini timeout handling
+  it('Gemini Provider 8: Request timeouts are caught and mapped to 504 TIMEOUT_ERROR', () => {
+    const abortErr = new Error('This operation was aborted');
+    abortErr.name = 'AbortError';
+
+    const normalized = normalizeGeminiError(abortErr, 'gemini-2.5-flash');
+    assert.strictEqual(normalized.code, 'TIMEOUT_ERROR');
+    assert.strictEqual(normalized.statusCode, 504);
+  });
+
+  // 9. Gemini API error mapping
+  it('Gemini Provider 9: API errors are mapped into standardized error codes without leaking keys', () => {
+    // 9a. Invalid key
+    const keyErr = new Error('API_KEY_INVALID: API key not valid AIzaSyD9xExampleSecretKey');
+    keyErr.status = 400;
+    const normKey = normalizeGeminiError(keyErr, 'gemini-2.5-flash');
+    assert.strictEqual(normKey.code, 'INVALID_API_KEY');
+    assert.strictEqual(normKey.statusCode, 401);
+    assert.ok(!normKey.message.includes('AIzaSyD9xExampleSecretKey'));
+
+    // 9b. Model not found
+    const modelErr = new Error('models/unknown-gemini-model was not found');
+    modelErr.status = 404;
+    const normModel = normalizeGeminiError(modelErr, 'unknown-gemini-model');
+    assert.strictEqual(normModel.code, 'MODEL_NOT_FOUND');
+    assert.strictEqual(normModel.statusCode, 404);
+
+    // 9c. Rate limit / quota
+    const quotaErr = new Error('RESOURCE_EXHAUSTED quota exceeded for project');
+    quotaErr.status = 429;
+    const normQuota = normalizeGeminiError(quotaErr, 'gemini-2.5-flash');
+    assert.strictEqual(normQuota.code, 'RATE_LIMIT_EXCEEDED');
+    assert.strictEqual(normQuota.statusCode, 429);
+  });
+
+  // 10. Malformed Gemini response
+  it('Gemini Provider 10: Empty or malformed provider responses fall back safely without crashing', () => {
+    const emptyNorm = normalizeGeminiResponse({}, 'gemini-2.5-flash');
+    assert.strictEqual(emptyNorm.message, '');
+    assert.strictEqual(emptyNorm.toolCalls, null);
+    assert.strictEqual(emptyNorm.usage, null);
+
+    const nullNorm = normalizeGeminiResponse(null, 'gemini-2.5-flash');
+    assert.strictEqual(nullNorm.message, '');
+    assert.strictEqual(nullNorm.toolCalls, null);
+  });
+
+  // 11. Provider selection
+  it('Gemini Provider 11: Provider selection toggles between Gemini and OpenAI cleanly', () => {
+    const originalProvider = config.aiProvider;
+    try {
+      config.aiProvider = 'gemini';
+      const activeGemini = aiService.getProvider();
+      assert.ok(activeGemini instanceof GeminiProvider);
+
+      config.aiProvider = 'openai';
+      const activeOpenAi = aiService.getProvider();
+      assert.ok(activeOpenAi instanceof OpenAiProvider);
+
+      config.aiProvider = 'unknown_provider';
+      assert.throws(
+        () => aiService.getProvider(),
+        (err) => err.code === 'CONFIG_MISSING'
+      );
+    } finally {
+      config.aiProvider = originalProvider;
+    }
   });
 });
 

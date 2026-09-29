@@ -57,9 +57,9 @@ export class EmbeddingService {
       throw new Error('Text cannot be empty or whitespace.');
     }
 
-    const { isValid } = validateAiConfig();
+    const hasOpenAiKey = Boolean(config.openai?.apiKey);
 
-    if (isValid && config.embedding.provider === 'openai') {
+    if (hasOpenAiKey && config.embedding.provider === 'openai') {
       try {
         const client = this._getClient();
         if (client) {

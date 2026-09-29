@@ -28,7 +28,7 @@ The agent's multi-phase architecture is designed to:
 - **Frontend:** React 19, Vite, Tailwind CSS v4, Lucide Icons, React Markdown (GFM support)
 - **Backend:** Node.js, Express.js (ES Modules), CORS, dotenv
 - **Database (Phase 2):** MongoDB with Mongoose (with automated graceful degradation / in-memory fallback)
-- **AI Integration (Phase 3):** OpenAI-compatible official SDK (`openai`) with dynamic tool calling and controlled agent loop
+- **AI Integration (Active: Gemini / Alternative: OpenAI):** Official Google Gen AI SDK (`@google/genai`) with configurable model (`gemini-2.5-flash`), tool calling schema adapter, and provider-agnostic architecture allowing seamless switching to OpenAI
 - **Testing:** Node.js native test runner (`node --test`), Oxlint
 - **Architecture Philosophy:** Decoupled client/server, clean layer separation, zero hardcoded model names, defensive error handling
 
@@ -375,8 +375,8 @@ ToolRegistry
  ├── Practice (start_practice_session, submit_practice_answer, get_practice_history)
  ├── RAG (search_knowledge)
  └── Web Search (search_web)
-       ↓
- External Providers (OpenAI, Tavily/SerpApi)
+        ↓
+  External Providers (Active: Google Gemini via @google/genai | Alternative: OpenAI | Tavily/SerpApi)
 
 Supporting Production Layers:
 ├── Evaluation Framework (evaluationDataset.js, evaluationMetrics.js, evaluation.service.js)
@@ -413,7 +413,7 @@ A lightweight, deterministic behavioral evaluation runner benchmarks the agent o
 
 ### 10.2 Agent Tracing & Observability
 - **Request Tracing (`trace.service.js`):** Every agent execution receives a correlation ID (`requestId` / `traceId`). Tracks start time, total duration, iterations, executed tools with individual latencies, success/failure status, and model metadata.
-- **Token Metadata:** Safely captures `promptTokens`, `completionTokens`, and `totalTokens` when provided by the AI provider; falls back to `null` if unavailable (never fabricates token figures).
+- **Token Metadata:** Safely captures `promptTokens`, `completionTokens`, and `totalTokens` when provided by Gemini (`usageMetadata`); falls back to `null` if unavailable (never fabricates token figures).
 - **Process Metrics (`metrics.service.js`):** In-memory metrics tracking total requests, success rate, average latency, tool invocations, tool failures, and category counts (Web, RAG, Practice, Placement).
 - **Diagnostics Endpoint:** `GET /api/health/metrics` exposes metrics snapshot (restricted in production mode).
 
@@ -427,7 +427,7 @@ A lightweight, deterministic behavioral evaluation runner benchmarks the agent o
 2. **Instruction Hierarchy:** System instructions strictly take precedence. The agent is explicitly instructed never to follow instructions embedded inside retrieved text or user inputs that attempt to override system rules.
 3. **Direct Injection Heuristic Guardrail:** Intercepts jailbreaks and leak attempts (`"ignore previous instructions"`, `"reveal system prompt"`, `"show API key"`) and returns safe refusals without invoking tools or leaking internals.
 4. **Credential & Secret Protection:**
-   - Error messages scrub API keys (`sk-...`) and database credentials (`mongodb://...`).
+   - Error messages scrub API keys (`sk-...`, `AIza...`) and database credentials (`mongodb://...`).
    - Production errors return sanitized messages with generic `SERVER_ERROR` codes.
    - All API keys remain strictly server-side.
 5. **No Arbitrary Execution:** No arbitrary code execution, no shell execution, and no arbitrary URL scraping exists; tool invocations are strictly bounded to the allowlisted `ToolRegistry`.
@@ -439,21 +439,53 @@ A lightweight, deterministic behavioral evaluation runner benchmarks the agent o
 - **Test Bypass:** Automatically bypassed in `NODE_ENV=test` unless tested explicitly with `x-test-rate-limit` headers.
 
 ### 10.5 Health & Readiness Endpoints
-- `GET /api/health` — Application liveness and basic service configuration status.
-- `GET /api/health/readiness` — Verifies readiness of MongoDB database connection and AI provider configuration without exposing credentials.
+- `GET /api/health` — Application liveness, active AI provider (`gemini`), configuration status, and database status.
+- `GET /api/health/readiness` — Verifies readiness of MongoDB connection and active AI provider configuration without exposing credentials.
 - `GET /api/health/metrics` — Process-level observability metrics (development only).
 
-### 10.6 Environment Variables
-Configured in `server/src/config/env.js` and `.env.example`:
+### 10.6 AI Provider Architecture & Environment Configuration
+The application uses a **provider-agnostic architecture** with Google Gemini as the active chat/generation engine and OpenAI preserved as an alternative:
+
+- **Active Provider:** Google Gemini via official `@google/genai` SDK.
+- **Configurable Model:** Configured via `GEMINI_MODEL` (default: `gemini-2.5-flash`). Overridable to any supported Gemini model.
+- **Credentials:** `GEMINI_API_KEY` is loaded strictly server-side from `.env` and is never sent to the client or logged.
+- **Quota & Free Tier:** Free-tier usage is subject to Google's current account eligibility and quota limits.
+- **Subsystem Separation:**
+  - Chat/Text Generation: Powered by Gemini (`AI_PROVIDER=gemini`).
+  - Vector Embeddings: Subsystem (`EMBEDDING_PROVIDER`) remains separate for RAG.
+  - Web Intelligence: Subsystem (`WEB_SEARCH_PROVIDER`) remains separate for external retrieval.
+
+Environment variables configured in `server/src/config/env.js` and `.env.example`:
 ```env
-PORT=5001
-NODE_ENV=development
-MONGODB_URI=mongodb://127.0.0.1:27017/ai-placement-agent
+# Active AI Text Generation Provider (gemini | openai)
+AI_PROVIDER=gemini
+
+# Google Gemini API Configuration (Default Provider)
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-2.5-flash
+
+# OpenAI-Compatible API Configuration (Alternative Provider / Embeddings)
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4o-mini
+OPENAI_BASE_URL=
+
+# Vector Embeddings Subsystem
+EMBEDDING_PROVIDER=openai
+EMBEDDING_MODEL=text-embedding-3-small
+
+# Web Intelligence Subsystem
 WEB_SEARCH_PROVIDER=mock
 WEB_SEARCH_API_KEY=
 WEB_SEARCH_ENGINE=duckduckgo
+
+# MongoDB Connection String
+MONGODB_URI=mongodb://localhost:27017/placement_agent
+
+# Server Port & Environment
+PORT=5000
+NODE_ENV=development
+
+# Abuse Protection & Rate Limiting
 RATE_LIMIT_WINDOW_MS=60000
 RATE_LIMIT_MAX_REQUESTS=60
 ```

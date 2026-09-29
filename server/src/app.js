@@ -34,13 +34,16 @@ app.use(requestLogger);
 
 // Health & System Info
 app.get('/api/health', (req, res) => {
-  const { isValid, missing } = validateAiConfig();
+  const { isValid, missing, provider } = validateAiConfig();
   const dbStatus = getDatabaseStatus();
+  const activeModel = provider === 'gemini' ? config.gemini.model : config.openai.model;
 
   return successResponse(res, {
     status: 'online',
     service: 'AI Placement Agent Server',
-    configuredModel: config.openai.model || 'Not configured',
+    aiProvider: provider || 'gemini',
+    aiProviderConfigured: isValid,
+    configuredModel: activeModel || 'Not configured',
     aiReady: isValid,
     database: dbStatus,
     ...(missing.length > 0 ? { missingEnv: missing } : {}),
@@ -50,13 +53,14 @@ app.get('/api/health', (req, res) => {
 
 // Dependency Readiness Check (Phase 9)
 app.get('/api/health/readiness', (req, res) => {
-  const { isValid: aiConfigured } = validateAiConfig();
+  const { isValid: aiConfigured, provider } = validateAiConfig();
   const dbStatus = getDatabaseStatus();
 
   return successResponse(res, {
     status: 'ready',
     database: dbStatus.connected ? 'connected' : (config.mongodbUri ? 'disconnected' : 'in-memory'),
-    aiProvider: aiConfigured ? 'configured' : 'not_configured',
+    aiProvider: provider || 'gemini',
+    aiProviderConfigured: aiConfigured,
     timestamp: new Date().toISOString(),
   });
 });
