@@ -1780,37 +1780,71 @@ describe('AI Placement Agent - Full API & Agent Test Suite (Phase 1 through Phas
   });
 
   it('Phase 6.15: Adaptive next-question behavior adjusts difficulty based on score', async () => {
-    const session = await practiceService.createSession({
-      userId: testUserId,
-      mode: 'practice',
-      topic: 'SQL',
-      difficulty: 'medium',
-      questionCount: 3,
-    });
+    const originalEvaluate = answerEvaluationService.evaluateAnswer;
+    let evalCallCount = 0;
+    answerEvaluationService.evaluateAnswer = async (params) => {
+      evalCallCount++;
+      if (evalCallCount === 1) {
+        return {
+          score: 20,
+          correctness: 20,
+          relevance: 20,
+          clarity: 40,
+          depth: 10,
+          strengths: [],
+          weaknesses: ['Incomplete answer'],
+          missingConcepts: params.expectedConcepts || [],
+          feedback: 'Needs improvement.',
+        };
+      }
+      return {
+        score: 90,
+        correctness: 90,
+        relevance: 90,
+        clarity: 90,
+        depth: 90,
+        strengths: ['Great technical depth'],
+        weaknesses: [],
+        missingConcepts: [],
+        feedback: 'Excellent answer covering core concepts.',
+      };
+    };
 
-    // Score low on question 1
-    const result1 = await practiceService.submitAnswer({
-      sessionId: session.id,
-      userId: testUserId,
-      answer: 'Not sure.',
-    });
+    try {
+      const session = await practiceService.createSession({
+        userId: testUserId,
+        mode: 'practice',
+        topic: 'SQL',
+        difficulty: 'medium',
+        questionCount: 3,
+      });
 
-    assert.strictEqual(result1.nextQuestion.difficulty, 'easy', 'Should adapt down to easy on poor performance');
+      // Score low on question 1
+      const result1 = await practiceService.submitAnswer({
+        sessionId: session.id,
+        userId: testUserId,
+        answer: 'Not sure.',
+      });
 
-    // Score high on question 2 covering expected concepts
-    const concepts = result1.nextQuestion.expectedConcepts || ['window functions', 'partition by'];
-    const answer2 = `This concept covers ${concepts.join(' and ')} in technical depth, ensuring optimized query performance, proper indexing, and efficient calculation across partitions without collapsing table rows.`;
+      assert.strictEqual(result1.nextQuestion.difficulty, 'easy', 'Should adapt down to easy on poor performance');
 
-    const result2 = await practiceService.submitAnswer({
-      sessionId: session.id,
-      userId: testUserId,
-      answer: answer2,
-    });
+      // Score high on question 2 covering expected concepts
+      const concepts = result1.nextQuestion.expectedConcepts || ['window functions', 'partition by'];
+      const answer2 = `This concept covers ${concepts.join(' and ')} in technical depth, ensuring optimized query performance, proper indexing, and efficient calculation across partitions without collapsing table rows.`;
 
-    assert.ok(
-      ['medium', 'hard'].includes(result2.nextQuestion.difficulty),
-      'Should adapt difficulty up following strong performance'
-    );
+      const result2 = await practiceService.submitAnswer({
+        sessionId: session.id,
+        userId: testUserId,
+        answer: answer2,
+      });
+
+      assert.ok(
+        ['medium', 'hard'].includes(result2.nextQuestion.difficulty),
+        'Should adapt difficulty up following strong performance'
+      );
+    } finally {
+      answerEvaluationService.evaluateAnswer = originalEvaluate;
+    }
   });
 
   it('Phase 6.16: Complete session calculates overall score and summary diagnostics', async () => {
@@ -3071,32 +3105,44 @@ Paragraph 3: Eventual consistency allows replicas to diverge temporarily as long
   it('Phase 9.6: Rate limiter throttles excessive requests with 429 and structured error', async () => {
     rateLimiter.reset();
 
+    const originalGenerate = aiService.generateChatResponse;
+    aiService.generateChatResponse = async () => ({
+      message: 'Rate limit test mock response',
+      rawMessage: { role: 'assistant', content: 'Rate limit test mock response' },
+      model: 'mock',
+      toolCalls: null,
+      usage: { promptTokens: 10, completionTokens: 10, totalTokens: 20 },
+    });
+
     let hitRateLimit = false;
     let rateLimitResponse = null;
 
-    for (let i = 0; i < 65; i++) {
-      const res = await fetch(`http://localhost:${TEST_PORT}/api/chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-test-rate-limit': 'true',
-        },
-        body: JSON.stringify({ message: 'Rate limit test message' }),
-      });
+    try {
+      for (let i = 0; i < 65; i++) {
+        const res = await fetch(`http://localhost:${TEST_PORT}/api/chat`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-test-rate-limit': 'true',
+          },
+          body: JSON.stringify({ message: 'Rate limit test message' }),
+        });
 
-      if (res.status === 429) {
-        hitRateLimit = true;
-        rateLimitResponse = await res.json();
-        break;
+        if (res.status === 429) {
+          hitRateLimit = true;
+          rateLimitResponse = await res.json();
+          break;
+        }
       }
+
+      assert.strictEqual(hitRateLimit, true);
+      assert.strictEqual(rateLimitResponse.success, false);
+      assert.strictEqual(rateLimitResponse.error.code, 'RATE_LIMITED');
+      assert.ok(rateLimitResponse.error.message.includes('Too many requests'));
+    } finally {
+      aiService.generateChatResponse = originalGenerate;
+      rateLimiter.reset();
     }
-
-    assert.strictEqual(hitRateLimit, true);
-    assert.strictEqual(rateLimitResponse.success, false);
-    assert.strictEqual(rateLimitResponse.error.code, 'RATE_LIMITED');
-    assert.ok(rateLimitResponse.error.message.includes('Too many requests'));
-
-    rateLimiter.reset();
   });
 
   // 7. Input validation & malformed requests

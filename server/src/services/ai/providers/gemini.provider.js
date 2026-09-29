@@ -120,12 +120,16 @@ export function adaptMessagesToGemini(input, options = {}) {
           } catch {
             args = {};
           }
-          parts.push({
+          const callPart = {
             functionCall: {
               name: tc.function?.name,
               args,
             },
-          });
+          };
+          if (tc.thoughtSignature) {
+            callPart.thoughtSignature = tc.thoughtSignature;
+          }
+          parts.push(callPart);
         }
       }
       if (parts.length > 0) {
@@ -158,21 +162,28 @@ export function normalizeGeminiResponse(response, model) {
   let normalizedToolCalls = null;
 
   // Handle functionCalls from response helper or candidates
+  const candidateParts = response?.candidates?.[0]?.content?.parts || [];
   const functionCalls = response?.functionCalls ||
-    response?.candidates?.[0]?.content?.parts
+    candidateParts
       ?.filter((p) => p.functionCall)
       ?.map((p) => p.functionCall) ||
     [];
 
   if (Array.isArray(functionCalls) && functionCalls.length > 0) {
-    normalizedToolCalls = functionCalls.map((fc, idx) => ({
-      id: fc.id || `call_gemini_${Date.now()}_${idx}`,
-      type: 'function',
-      function: {
-        name: fc.name,
-        arguments: typeof fc.args === 'string' ? fc.args : JSON.stringify(fc.args || {}),
-      },
-    }));
+    normalizedToolCalls = functionCalls.map((fc, idx) => {
+      const matchingPart = candidateParts.find(
+        (p) => p.functionCall?.name === fc.name || p.functionCall?.id === fc.id
+      );
+      return {
+        id: fc.id || `call_gemini_${Date.now()}_${idx}`,
+        type: 'function',
+        thoughtSignature: fc.thoughtSignature || matchingPart?.thoughtSignature,
+        function: {
+          name: fc.name,
+          arguments: typeof fc.args === 'string' ? fc.args : JSON.stringify(fc.args || {}),
+        },
+      };
+    });
   }
 
   const replyText = typeof response?.text === 'string' ? response.text.trim() : '';
