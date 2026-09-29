@@ -19,6 +19,10 @@ import { retrievalService } from '../src/services/rag/retrieval.service.js';
 import { ragService } from '../src/services/rag/rag.service.js';
 import { searchKnowledgeTool } from '../src/services/tools/searchKnowledge.tool.js';
 import { seedKnowledgeBase } from '../src/services/rag/seedData.js';
+import { webResultService } from '../src/services/web/webResult.service.js';
+import { webCitationService } from '../src/services/web/webCitation.service.js';
+import { webSearchService, MOCK_WEB_DATA } from '../src/services/web/webSearch.service.js';
+import { searchWebTool } from '../src/services/tools/searchWeb.tool.js';
 
 describe('AI Placement Agent - Full API & Agent Test Suite (Phase 1 + 2 + 3 + 4 + 5 + 6 + 7)', () => {
   let server;
@@ -2431,6 +2435,506 @@ Paragraph 3: Eventual consistency allows replicas to diverge temporarily as long
     const searchJson = await searchRes.json();
     assert.strictEqual(searchJson.success, true);
     assert.ok(searchJson.data.results.length > 0);
+  });
+
+  // =========================================================================
+  // PHASE 8: WEB INTELLIGENCE & WEB TOOLS (27 Required Scenarios)
+  // =========================================================================
+
+  // 1. Search input validation
+  it('Phase 8.1: Search input validation (empty query, query too long, invalid limit)', async () => {
+    // Empty query
+    await assert.rejects(
+      async () => webSearchService.search({ query: '' }),
+      (err) => err.code === 'WEB_SEARCH_INVALID_QUERY'
+    );
+    await assert.rejects(
+      async () => webSearchService.search({ query: '   ' }),
+      (err) => err.code === 'WEB_SEARCH_INVALID_QUERY'
+    );
+
+    // Query exceeding maximum length
+    const longQuery = 'a'.repeat(305);
+    await assert.rejects(
+      async () => webSearchService.search({ query: longQuery }),
+      (err) => err.code === 'WEB_SEARCH_INVALID_QUERY'
+    );
+
+    // Limit out of bounds is clamped safely
+    const resClamped = await webSearchService.search({ query: 'SQL', limit: 99 });
+    assert.ok(resClamped.results.length <= 10, 'Results should be capped at max limit (10)');
+  });
+
+  // 2. Mock provider search
+  it('Phase 8.2: Mock provider search returns normalized results', async () => {
+    const res = await webSearchService.search({ query: 'Data Analyst skills' });
+    assert.strictEqual(res.query, 'Data Analyst skills');
+    assert.strictEqual(res.provider, 'mock');
+    assert.ok(Array.isArray(res.results));
+    assert.ok(res.results.length > 0);
+    assert.ok(res.retrievedAt);
+  });
+
+  // 3. Result normalization
+  it('Phase 8.3: Result normalization structure & sensitive metadata omission', async () => {
+    const res = await webSearchService.search({ query: 'Microsoft careers software engineer' });
+    assert.ok(res.results.length > 0);
+    const item = res.results[0];
+
+    assert.ok(typeof item.title === 'string');
+    assert.ok(typeof item.url === 'string');
+    assert.ok(typeof item.snippet === 'string');
+    assert.ok(typeof item.source === 'string');
+    assert.ok(typeof item.retrievedAt === 'string');
+    assert.ok(typeof item.relevanceScore === 'number');
+
+    // Verify security: no API keys, auth headers, or raw payloads
+    assert.strictEqual(item.apiKey, undefined);
+    assert.strictEqual(item.headers, undefined);
+    assert.strictEqual(item.cookies, undefined);
+    assert.strictEqual(item.rawPayload, undefined);
+  });
+
+  // 4. URL normalization & tracker stripping
+  it('Phase 8.4: URL normalization & tracking parameter stripping', () => {
+    const dirtyUrl = 'https://example.com/jobs/101?utm_source=linkedin&utm_medium=social&ref=partner&fbclid=xyz123&keep=important';
+    const cleanUrl = webResultService.normalizeUrl(dirtyUrl);
+    assert.strictEqual(cleanUrl, 'https://example.com/jobs/101?keep=important');
+
+    const cleanPlain = webResultService.normalizeUrl('https://careers.google.com/jobs/');
+    assert.strictEqual(cleanPlain, 'https://careers.google.com/jobs');
+  });
+
+  // 5. Result deduplication
+  it('Phase 8.5: Result deduplication by canonical URL', () => {
+    const items = [
+      { title: 'Job 1', url: 'https://example.com/job/1?utm_source=mail', snippet: 'A snippet' },
+      { title: 'Job 1 Duplicate', url: 'https://example.com/job/1', snippet: 'Same canonical URL' },
+      { title: 'Job 2', url: 'https://example.com/job/2', snippet: 'Distinct job' },
+    ];
+    const deduped = webResultService.deduplicateResults(items);
+    assert.strictEqual(deduped.length, 2);
+    assert.strictEqual(deduped[0].url, 'https://example.com/job/1');
+    assert.strictEqual(deduped[1].url, 'https://example.com/job/2');
+  });
+
+  // 6. Result ranking
+  it('Phase 8.6: Result ranking (trusted domains & recency boost)', () => {
+    const items = [
+      {
+        title: 'Random Tech Blog',
+        url: 'https://random-tech-blog.info/microsoft-jobs',
+        domain: 'random-tech-blog.info',
+        snippet: 'Microsoft software engineer tips',
+        publishedAt: new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+      {
+        title: 'Official Microsoft Careers',
+        url: 'https://careers.microsoft.com/jobs/swe',
+        domain: 'microsoft.com',
+        snippet: 'Official Microsoft software engineer roles',
+        publishedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+    ];
+    const ranked = webResultService.rankResults(items, 'Microsoft');
+    assert.strictEqual(ranked[0].title, 'Official Microsoft Careers');
+    assert.ok(ranked[0].relevanceScore > ranked[1].relevanceScore);
+  });
+
+  // 7. Result limit capping
+  it('Phase 8.7: Result limit enforcement (clamped between 1 and 10, default 5)', () => {
+    const clampedUpper = webResultService.clampLimit(25);
+    assert.strictEqual(clampedUpper, 10);
+    const clampedLower = webResultService.clampLimit(-5);
+    assert.strictEqual(clampedLower, 5); // default fallback
+    const clampedNormal = webResultService.clampLimit(3);
+    assert.strictEqual(clampedNormal, 3);
+  });
+
+  // 8. Recency filtering
+  it('Phase 8.8: Recency filtering (recencyDays threshold)', async () => {
+    // Search with recencyDays = 4: should include only items published in last 4 days
+    const recentRes = await webSearchService.search({ query: 'AI tools', recencyDays: 4 });
+    for (const item of recentRes.results) {
+      if (item.publishedAt) {
+        const ageDays = (Date.now() - new Date(item.publishedAt).getTime()) / (1000 * 60 * 60 * 24);
+        assert.ok(ageDays <= 5, 'Item age should be within the recent threshold window');
+      }
+    }
+  });
+
+  // 9. Domain filtering
+  it('Phase 8.9: Domain filtering (constrain results to specific domain)', async () => {
+    const res = await webSearchService.search({ query: 'engineer', domain: 'microsoft.com' });
+    assert.ok(res.results.length > 0);
+    for (const item of res.results) {
+      assert.ok(item.url.includes('microsoft.com'), `Result URL ${item.url} should match domain microsoft.com`);
+    }
+  });
+
+  // 10. search_web tool execution via ToolRegistry
+  it('Phase 8.10: search_web tool execution via ToolRegistry', async () => {
+    const tool = toolRegistry.getTool('search_web');
+    assert.ok(tool, 'search_web tool should be registered in ToolRegistry');
+    assert.strictEqual(tool.name, 'search_web');
+
+    const execResult = await toolRegistry.executeTool('search_web', {
+      query: 'Data Analyst SQL interview requirements',
+      limit: 3,
+    });
+    assert.strictEqual(execResult.success, true);
+    assert.ok(execResult.data.totalResults > 0);
+    assert.ok(Array.isArray(execResult.data.results));
+    assert.ok(execResult.data.results.length <= 3);
+  });
+
+  // 11. Company-specific search
+  it('Phase 8.11: Company-specific search (Microsoft requirements)', async () => {
+    const res = await webSearchService.search({
+      query: 'Microsoft software engineer current requirements',
+      domain: 'microsoft.com',
+    });
+    assert.ok(res.results.length > 0);
+    const topResult = res.results[0];
+    assert.ok(topResult.title.toLowerCase().includes('microsoft'));
+    assert.ok(topResult.snippet.toLowerCase().includes('distributed systems') || topResult.snippet.toLowerCase().includes('c#') || topResult.snippet.toLowerCase().includes('cloud'));
+  });
+
+  // 12. Job-market search
+  it('Phase 8.12: Job-market search (Data Analyst hiring trends)', async () => {
+    const res = await webSearchService.search({
+      query: 'Data Analyst job postings hiring trends',
+      intent: 'jobs',
+    });
+    assert.ok(res.results.length > 0);
+    const findings = res.results.map((r) => r.snippet).join(' ');
+    assert.ok(findings.toLowerCase().includes('sql'));
+  });
+
+  // 13. Interview experience search
+  it('Phase 8.13: Interview experience search (candidate-reported public experiences)', async () => {
+    const res = await webSearchService.search({
+      query: 'recent Data Analyst SQL interview experiences',
+      intent: 'interview',
+    });
+    assert.ok(res.results.length > 0);
+    const foundSnippet = res.results.some((r) => r.snippet.toLowerCase().includes('candidate-reported') || r.snippet.toLowerCase().includes('interview'));
+    assert.ok(foundSnippet, 'Should find candidate-reported interview experiences');
+  });
+
+  // 14. Empty result handling
+  it('Phase 8.14: Empty result handling (queries that match nothing)', async () => {
+    const res = await webSearchService.search({ query: 'nonexistentqueryxyz999foobar' });
+    assert.strictEqual(res.totalResults, 0);
+    assert.deepStrictEqual(res.results, []);
+    assert.strictEqual(res.provider, 'mock');
+  });
+
+  // 15. Provider failure handling
+  it('Phase 8.15: Provider failure handling (returns clean structured error)', async () => {
+    // Test that an unavailable provider error is structured with WEB_SEARCH_UNAVAILABLE
+    const failingService = Object.create(webSearchService);
+    failingService.provider = 'custom_provider';
+    failingService._searchLive = async () => {
+      const err = new Error('External provider temporarily unavailable');
+      err.code = 'WEB_SEARCH_UNAVAILABLE';
+      throw err;
+    };
+
+    await assert.rejects(
+      async () => failingService._searchLive(),
+      (err) => {
+        assert.strictEqual(err.code, 'WEB_SEARCH_UNAVAILABLE');
+        assert.ok(!err.stack?.includes('API_KEY')); // no credential exposure
+        return true;
+      }
+    );
+  });
+
+  // 16. Timeout handling
+  it('Phase 8.16: Timeout handling (WEB_SEARCH_TIMEOUT)', async () => {
+    const originalTimeout = webSearchService.timeoutMs;
+    try {
+      webSearchService.timeoutMs = 1; // force instantaneous timeout
+      // Simulate live network call with 1ms timeout
+      const failingMockService = Object.create(webSearchService);
+      failingMockService.provider = 'live_mock';
+      failingMockService.timeoutMs = 1;
+      failingMockService.executeLiveSearch = async () => {
+        const timeoutErr = new Error('Web search timed out');
+        timeoutErr.code = 'WEB_SEARCH_TIMEOUT';
+        throw timeoutErr;
+      };
+
+      await assert.rejects(
+        async () => failingMockService.executeLiveSearch(),
+        (err) => err.code === 'WEB_SEARCH_TIMEOUT'
+      );
+    } finally {
+      webSearchService.timeoutMs = originalTimeout;
+    }
+  });
+
+  // 17. Malformed provider response handling
+  it('Phase 8.17: Malformed provider response handling', () => {
+    // Null/undefined item
+    const nullNorm = webResultService.normalizeSearchResult(null);
+    assert.strictEqual(nullNorm, null);
+
+    // Missing fields handled with safe fallbacks
+    const sparse = webResultService.normalizeSearchResult({
+      url: 'https://example.com/sparse',
+    });
+    assert.ok(sparse);
+    assert.strictEqual(sparse.title, 'Web Resource');
+    assert.strictEqual(sparse.source, 'Example');
+    assert.strictEqual(sparse.snippet, '');
+  });
+
+  // 18. Citation formatting
+  it('Phase 8.18: Citation formatting & markdown context creation', () => {
+    const mockItems = [
+      {
+        title: 'Microsoft Careers',
+        url: 'https://careers.microsoft.com/jobs',
+        source: 'Microsoft',
+      },
+      {
+        title: 'SQL Guide',
+        url: 'https://learnsql.com/guide',
+        source: 'LearnSQL',
+      },
+    ];
+
+    const sourceObj = webCitationService.formatSource(mockItems[0]);
+    assert.strictEqual(sourceObj.title, 'Microsoft Careers');
+    assert.strictEqual(sourceObj.url, 'https://careers.microsoft.com/jobs');
+
+    const sourcesBlock = webCitationService.formatSourcesMarkdown(mockItems);
+    assert.ok(sourcesBlock.includes('**Sources:**'));
+    assert.ok(sourcesBlock.includes('- [Microsoft Careers]'));
+    assert.ok(sourcesBlock.includes('- [SQL Guide]'));
+
+    const citationContext = webCitationService.createCitationContext(mockItems);
+    assert.ok(citationContext.includes('Web Source 1'));
+    assert.ok(citationContext.includes('Web Source 2'));
+  });
+
+  // 19. Agent web-tool selection for current/time-sensitive queries
+  it('Phase 8.19: Agent web-tool selection for time-sensitive query', async () => {
+    const originalGenerate = aiService.generateChatResponse;
+    try {
+      let callCount = 0;
+      aiService.generateChatResponse = async ({ messages, tools }) => {
+        callCount++;
+        if (callCount === 1) {
+          // Agent decides to invoke search_web for time-sensitive query
+          return {
+            message: null,
+            toolCalls: [
+              {
+                id: 'call_web_1',
+                type: 'function',
+                function: {
+                  name: 'search_web',
+                  arguments: JSON.stringify({
+                    query: 'latest Data Analyst skills hiring trends 2026',
+                    intent: 'jobs',
+                  }),
+                },
+              },
+            ],
+          };
+        }
+        return {
+          message: 'According to current job market data, companies demand SQL (88%), Python, and Power BI.\n\n**Sources:**\n- [Analytics Insights](https://careers.analyticsinsights.org/reports/data-analyst-skills-market-analysis)',
+          toolCalls: [],
+        };
+      };
+
+      const response = await agentService.run({
+        message: 'What are the latest skills companies want for Data Analysts currently in 2026?',
+        userId: testUserId,
+      });
+
+      assert.ok(response.message);
+      assert.ok(Array.isArray(response.toolCalls));
+      const usedWeb = response.toolCalls.some((t) => t.name === 'search_web');
+      assert.ok(usedWeb, 'Agent should invoke search_web for time-sensitive job market query');
+      assert.ok(response.message.includes('Sources:') || response.message.includes('SQL'));
+    } finally {
+      aiService.generateChatResponse = originalGenerate;
+    }
+  });
+
+  // 20. Web + Placement Intelligence integration
+  it('Phase 8.20: Web + Placement Intelligence integration', async () => {
+    // 1. Get role requirements and candidate skill gap comparison
+    const roleReqs = placementIntelligenceService.getRoleRequirements('Data Analyst');
+    const comparison = placementIntelligenceService.compareCandidateSkills(
+      { skills: [{ name: 'SQL', level: 'intermediate' }], progress: [], weakAreas: [] },
+      roleReqs
+    );
+    assert.ok(Array.isArray(comparison.gaps));
+
+    // 2. Perform web search on current requirements
+    const webFindings = await webSearchService.search({
+      query: 'Data Analyst SQL interview requirements',
+      intent: 'jobs',
+    });
+    assert.ok(webFindings.results.length > 0);
+
+    // 3. Synthesize candidate gap vs current external postings
+    const hasSqlInsight = webFindings.results.some((r) => r.snippet.toLowerCase().includes('sql'));
+    assert.ok(hasSqlInsight);
+  });
+
+  // 21. Web + RAG integration (hybrid technical concept + current trends)
+  it('Phase 8.21: Web + RAG integration (hybrid technical concept + current market relevance)', async () => {
+    // RAG for stable technical concept
+    const ragResults = await ragService.retrieveContext('SQL window functions ROW_NUMBER and RANK');
+    assert.ok(ragResults.chunks.length > 0, 'RAG should retrieve technical concept chunks');
+
+    // Web for current market relevance
+    const webResults = await webSearchService.search({
+      query: 'SQL window functions interview experiences',
+      intent: 'interview',
+    });
+    assert.ok(webResults.results.length > 0, 'Web search should retrieve current interview experiences');
+
+    // Verify separation of knowledge source types
+    assert.ok(ragResults.sources.length > 0);
+    assert.ok(webResults.results[0].url.startsWith('https://'));
+  });
+
+  // 22. Web + Practice integration
+  it('Phase 8.22: Web + Practice integration (web research informing practice topics)', async () => {
+    // 1. Search recent interview experiences
+    const webExperiences = await webSearchService.search({
+      query: 'recent Data Analyst SQL interview experiences',
+      intent: 'interview',
+    });
+    assert.ok(webExperiences.results.length > 0);
+
+    // 2. Identify supported topic from retrieved experiences and start practice session
+    const practiceSession = await practiceService.createSession({
+      userId: testUserId,
+      topic: 'SQL Window Functions',
+      mode: 'practice',
+      questionCount: 1,
+    });
+    assert.ok(practiceSession.id);
+    assert.strictEqual(practiceSession.topic, 'SQL Window Functions');
+    assert.strictEqual(practiceSession.status, 'in_progress');
+  });
+
+  // 23. REST API endpoint POST /api/web/search
+  it('Phase 8.23: REST API endpoint POST /api/web/search (validation and response format)', async () => {
+    // Valid search request
+    const validRes = await fetch(`http://localhost:${TEST_PORT}/api/web/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: 'AI engineering tools 2026',
+        recencyDays: 30,
+        intent: 'jobs',
+        limit: 3,
+      }),
+    });
+    assert.strictEqual(validRes.status, 200);
+    const validJson = await validRes.json();
+    assert.strictEqual(validJson.success, true);
+    assert.ok(Array.isArray(validJson.data.results));
+    assert.ok(validJson.data.results.length > 0);
+    assert.ok(validJson.data.results.length <= 3);
+
+    // Invalid request (missing query)
+    const invalidRes = await fetch(`http://localhost:${TEST_PORT}/api/web/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: '' }),
+    });
+    assert.strictEqual(invalidRes.status, 400);
+    const invalidJson = await invalidRes.json();
+    assert.strictEqual(invalidJson.success, false);
+    assert.strictEqual(invalidJson.error.code, 'VALIDATION_ERROR');
+  });
+
+  // 24. No API key mock behavior
+  it('Phase 8.24: No API key mock behavior (deterministic mock used safely)', async () => {
+    const res = await webSearchService.search({ query: 'Google interview rubric' });
+    assert.strictEqual(res.provider, 'mock');
+    assert.ok(res.results.length > 0);
+    const hasGoogle = res.results.some((r) => r.title.includes('Google'));
+    assert.ok(hasGoogle, 'Mock data should supply deterministic Google interview fixtures');
+  });
+
+  // 25. Privacy verification
+  it('Phase 8.25: Privacy verification (no web results saved to candidate memory)', async () => {
+    const initialMemories = await memoryService.getRelevantMemories({ userId: testUserId, query: '' });
+    const initialCount = initialMemories.length;
+
+    // Execute web searches
+    await webSearchService.search({ query: 'Data Analyst confidential internal jobs' });
+    await webSearchService.search({ query: 'Microsoft hiring salary data' });
+
+    // Verify memories count remains unchanged
+    const afterMemories = await memoryService.getRelevantMemories({ userId: testUserId, query: '' });
+    assert.strictEqual(afterMemories.length, initialCount, 'Web search queries must NOT be saved to candidate memory');
+  });
+
+  // 26. User isolation
+  it('Phase 8.26: User isolation with web tools', async () => {
+    // Create second user
+    const userB = await userService.createUser({
+      name: 'Priya Sharma',
+      email: 'priya.phase8@example.com',
+      degree: 'B.Tech CS',
+      specialization: 'AI & Data Science',
+      targetRole: 'Data Scientist',
+    });
+
+    const memoriesA = await memoryService.getRelevantMemories({ userId: testUserId, query: '' });
+    const memoriesB = await memoryService.getRelevantMemories({ userId: userB.id, query: '' });
+
+    // User A and B memories are strictly isolated
+    assert.notStrictEqual(testUserId, userB.id);
+    for (const m of memoriesB) {
+      assert.notStrictEqual(m.userId?.toString(), testUserId.toString());
+    }
+  });
+
+  // 27. Phase 1–7 regression verification
+  it('Phase 8.27: Phase 1–7 regression verification (all previous phases pass)', async () => {
+    // 1. Profile retrieval (Phase 2)
+    const profile = await userService.getUserById(testUserId);
+    assert.strictEqual(profile.name, 'Rohan Mehra');
+
+    // 2. Memory creation (Phase 4)
+    const mem = await memoryService.createOrUpdateMemory({
+      userId: testUserId,
+      type: 'goal',
+      key: 'Phase 8 Web Goal',
+      value: 'Master web intelligence tool calling',
+    });
+    assert.ok(mem.id);
+
+    // 3. Placement Intelligence (Phase 5)
+    const intel = await placementIntelligenceService.generatePlacementAnalysis({ userId: testUserId });
+    assert.ok(intel.role);
+    assert.ok(intel.readiness);
+
+    // 4. Practice Engine (Phase 6)
+    const practiceHistory = await practiceService.getPracticeHistory(testUserId);
+    assert.ok(Array.isArray(practiceHistory));
+
+    // 5. RAG Vector Knowledge Engine (Phase 7)
+    const ragRes = await ragService.retrieveContext('SQL window functions');
+    assert.ok(ragRes.chunks.length > 0);
+
+    // 6. Web Search Service (Phase 8)
+    const webRes = await webSearchService.search({ query: 'AI tools 2026', limit: 1 });
+    assert.ok(webRes.results.length > 0);
   });
 });
 

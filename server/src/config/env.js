@@ -22,6 +22,11 @@ export const config = {
     provider: process.env.EMBEDDING_PROVIDER || 'openai',
     model: process.env.EMBEDDING_MODEL || 'text-embedding-3-small',
   },
+  webSearch: {
+    provider: process.env.WEB_SEARCH_PROVIDER || 'mock',
+    apiKey: process.env.WEB_SEARCH_API_KEY || '',
+    engine: process.env.WEB_SEARCH_ENGINE || '',
+  },
   mongodbUri: process.env.MONGODB_URI || '',
   nodeEnv: process.env.NODE_ENV || 'development',
 };

@@ -10,6 +10,7 @@ import memoryRoutes from './routes/memory.routes.js';
 import placementRoutes from './routes/placement.routes.js';
 import practiceRoutes from './routes/practice.routes.js';
 import knowledgeRoutes from './routes/knowledge.routes.js';
+import webRoutes from './routes/web.routes.js';
 import { successResponse } from './utils/apiResponse.js';
 
 const app = express();
@@ -53,6 +54,7 @@ app.use('/api', memoryRoutes);
 app.use('/api', placementRoutes);
 app.use('/api', practiceRoutes);
 app.use('/api', knowledgeRoutes);
+app.use('/api', webRoutes);
 
 // 404 & Centralized Error Handlers
 app.use(notFoundHandler);

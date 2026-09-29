@@ -52,7 +52,8 @@ export default function Sidebar({
     { name: 'Phase 4: Structured Memory', status: 'completed', desc: 'Long-term Tracking' },
     { name: 'Phase 5: Placement Engine', status: 'completed', desc: 'Readiness & Skill Gaps' },
     { name: 'Phase 6: Practice Engine', status: 'completed', desc: 'Mock Interviews & Evaluation' },
-    { name: 'Phase 7: RAG Engine', status: 'active', desc: 'Controlled Knowledge Base' },
+    { name: 'Phase 7: RAG Engine', status: 'completed', desc: 'Controlled Knowledge Base' },
+    { name: 'Phase 8: Web Intelligence', status: 'active', desc: 'Controlled Web Tools & Citations' },
   ];
 
   const isDbConnected = serverStatus?.database?.connected;
@@ -233,7 +234,7 @@ export default function Sidebar({
           <div className="pt-2 border-t border-slate-800/80">
             <div className="px-2 pb-2 text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center justify-between">
               <span>Roadmap</span>
-              <span className="text-[10px] text-emerald-400 font-mono">P2 ACTIVE</span>
+              <span className="text-[10px] text-emerald-400 font-mono">P8 ACTIVE</span>
             </div>
 
             <div className="space-y-1.5">

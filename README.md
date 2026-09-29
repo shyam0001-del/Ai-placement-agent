@@ -297,7 +297,64 @@ Grounded LLM Response with Clean Source Attribution
 
 ---
 
-## 9. Multi-Phase Roadmap
+---
+
+## 9. Phase 8 — Web Intelligence & Web Tools Architecture
+
+Phase 8 introduces a controlled **Web Intelligence layer** providing live, current external market retrieval without replacing internal RAG:
+
+```text
+User Question
+      ↓
+AgentService
+      ↓
+Decision: Internal RAG vs. Web Intelligence vs. Profile/Practice
+      ↓
+ToolRegistry: search_web
+      ↓
+WebSearchService (Configurable Provider: mock | tavily | serpapi)
+      ↓
+Raw Search Results
+      ↓
+WebResultService:
+  - Canonical URL Normalization (strips utm_*, fbclid, ref)
+  - Duplicate Removal
+  - Authority Domain Boost (careers.*, docs.*, tech publications)
+  - Recency Scoring (within 30 days)
+  - Snippet Quality & Length Filtering
+      ↓
+WebCitationService:
+  - Formats Source Citations: [Title](url)
+  - Generates Grounded Context Block
+      ↓
+Agent Synthesis with Clickable Citation Links
+```
+
+### Key Differences: RAG vs. Web Intelligence
+
+| Dimension | Phase 7 Internal RAG | Phase 8 Web Intelligence |
+|---|---|---|
+| **Scope** | Stable technical concepts (SQL, DBMS, DSA, System Design) | Time-sensitive hiring trends, company interview bars, public resources |
+| **Source** | Curated internal technical knowledge base | Public external web sources & official career portals |
+| **Tool** | `search_knowledge` | `search_web` |
+| **Persistence** | Embedded in local vector store | Request-scoped ephemeral results (never stored as permanent memory) |
+| **Freshness** | Curated placement preparation material | Real-time / recent (7, 14, 30, 90 days filterable) |
+
+### Important Guardrail & Disclaimer
+> *"Web results are external sources and may be incomplete, outdated, inaccurate, or anecdotal. The agent strictly distinguishes source claims from its own synthesis and never presents candidate-reported experiences as universal facts."*
+
+### Security & Privacy Protections
+- **Server-Side Credentials:** `WEB_SEARCH_API_KEY` is strictly managed server-side via `.env` and never returned to the frontend or logged.
+- **Privacy Assurance:** User search queries and web results are request-scoped and are **never** automatically persisted into the student's long-term `Memory` model.
+- **Strict Rate & Iteration Limits:** Reuses existing `MAX_TOOL_CALLS` and iteration guardrails to prevent recursive search loops.
+- **Deterministic Mock Provider:** When offline or without an API key (`WEB_SEARCH_PROVIDER=mock`), curated deterministic fixtures run in tests with zero internet dependency.
+
+### REST Endpoints (Development)
+- `POST /api/web/search` — Execute normalized, filtered web search queries with optional `recencyDays`, `domain`, `intent`, and `limit`.
+
+---
+
+## 10. Multi-Phase Roadmap
 
 | Phase | Milestone | Description | Status |
 |---|---|---|---|
@@ -308,17 +365,17 @@ Grounded LLM Response with Clean Source Attribution
 | **Phase 5** | **Placement Intelligence** | Deterministic gap analysis, role benchmarking, readiness indicator | **COMPLETED** |
 | **Phase 6** | **Practice & Interview Engine** | Mock interview sessions, semantic answer evaluation, adaptive difficulty | **COMPLETED** |
 | **Phase 7** | **RAG / Knowledge Engine** | Controlled internal technical docs, chunking, embeddings, vector retrieval, agent tool | **COMPLETED** |
-| **Phase 8** | **Live Web Tools** | Current company tech stacks, hiring trends, job post analysis | *Upcoming* |
+| **Phase 8** | **Web Intelligence & Web Tools** | Controlled web search, freshness filters, canonical deduplication, clickable citations | **COMPLETED** |
 | **Phase 9** | **Evaluation & Quality** | Automated test benchmark, token tracking, agent guardrails | *Upcoming* |
 
 ---
 
-## 10. Verification & Testing
+## 11. Verification & Testing
 
 Run the full end-to-end verification suite across all phases:
 
 ```bash
-# Run server test suite (103/103 automated tests across Phases 1-7)
+# Run server test suite (130/130 automated tests across Phases 1-8)
 npm run test:server
 
 # Run client linter (Oxlint)
@@ -327,6 +384,7 @@ npm run lint:client
 # Run client production build (Vite)
 npm run build:client
 ```
+
 
 
 

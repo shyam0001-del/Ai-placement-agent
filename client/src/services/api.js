@@ -518,5 +518,32 @@ export async function searchKnowledgeApi(searchParams) {
   return data.data;
 }
 
+/**
+ * ========================================================
+ * Web Intelligence & Search API Methods (Phase 8)
+ * ========================================================
+ */
 
-
+/**
+ * Execute web search query
+ * @param {Object} searchParams
+ * @param {string} searchParams.query
+ * @param {number} [searchParams.recencyDays]
+ * @param {string} [searchParams.domain]
+ * @param {string} [searchParams.intent]
+ * @param {number} [searchParams.limit]
+ */
+export async function searchWebApi(searchParams) {
+  const response = await fetch(`${API_BASE}/web/search`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(searchParams),
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.success) {
+    const err = new Error(data?.error?.message || 'Web search request failed');
+    err.code = data?.error?.code || 'WEB_SEARCH_ERROR';
+    throw err;
+  }
+  return data.data;
+}
