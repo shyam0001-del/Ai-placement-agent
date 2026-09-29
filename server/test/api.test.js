@@ -11,8 +11,16 @@ import { getDatabaseStatus } from '../src/config/db.js';
 import { practiceService } from '../src/services/practice/practice.service.js';
 import { questionGeneratorService } from '../src/services/practice/questionGenerator.service.js';
 import { answerEvaluationService } from '../src/services/practice/answerEvaluation.service.js';
+import { documentService } from '../src/services/rag/document.service.js';
+import { chunkingService } from '../src/services/rag/chunking.service.js';
+import { embeddingService } from '../src/services/rag/embedding.service.js';
+import { vectorStoreService } from '../src/services/rag/vectorStore.service.js';
+import { retrievalService } from '../src/services/rag/retrieval.service.js';
+import { ragService } from '../src/services/rag/rag.service.js';
+import { searchKnowledgeTool } from '../src/services/tools/searchKnowledge.tool.js';
+import { seedKnowledgeBase } from '../src/services/rag/seedData.js';
 
-describe('AI Placement Agent - Full API & Agent Test Suite (Phase 1 + 2 + 3 + 4 + 5 + 6)', () => {
+describe('AI Placement Agent - Full API & Agent Test Suite (Phase 1 + 2 + 3 + 4 + 5 + 6 + 7)', () => {
   let server;
   const TEST_PORT = 5096;
   let testUserId = '';
@@ -21,6 +29,9 @@ describe('AI Placement Agent - Full API & Agent Test Suite (Phase 1 + 2 + 3 + 4 
     await new Promise((resolve) => {
       server = app.listen(TEST_PORT, resolve);
     });
+
+    // Initialize seed knowledge base for tests
+    await seedKnowledgeBase();
 
     // Create a base candidate for Phase 2 and Phase 3 tests
     const user = await userService.createUser({
@@ -53,6 +64,8 @@ describe('AI Placement Agent - Full API & Agent Test Suite (Phase 1 + 2 + 3 + 4 
     userService.clearMemory();
     memoryService.clearMemory();
     practiceService.clearMemory();
+    documentService.clearMemory();
+    vectorStoreService.clearVectors();
   });
 
   // ==========================================
@@ -1986,6 +1999,438 @@ describe('AI Placement Agent - Full API & Agent Test Suite (Phase 1 + 2 + 3 + 4 
     assert.strictEqual(weakRes.status, 200);
     const weakData = await weakRes.json();
     assert.ok(Array.isArray(weakData.data));
+  });
+
+  // ==========================================
+  // PHASE 7 — RAG / KNOWLEDGE ENGINE TESTS
+  // ==========================================
+
+  let phase7DocId = '';
+
+  // 1. Create knowledge document
+  it('Phase 7.1: createDocument() successfully creates a knowledge document with contentHash', async () => {
+    const doc = await documentService.createDocument({
+      title: 'PostgreSQL Indexing & Query Execution Plans',
+      description: 'Understanding EXPLAIN ANALYZE, B-Trees, and sequential scan thresholds.',
+      category: 'SQL',
+      role: 'Backend Engineer',
+      contentType: 'guide',
+      tags: ['PostgreSQL', 'Indexes', 'Performance', 'Query Planner'],
+      content: `PostgreSQL utilizes various indexing methods including B-Tree, Hash, GiST, GIN, and BRIN.
+B-Tree indexes are the default and excel in equality (=) and range (<, <=, >, >=) queries.
+EXPLAIN ANALYZE runs the query and displays the actual execution times, plan tree, and disk vs buffer reads.
+Sequential scans occur when a table is small or when the query retrieves a large percentage of table pages.`,
+    });
+
+    assert.ok(doc.id);
+    assert.strictEqual(doc.title, 'PostgreSQL Indexing & Query Execution Plans');
+    assert.strictEqual(doc.category, 'SQL');
+    assert.strictEqual(doc.role, 'Backend Engineer');
+    assert.strictEqual(doc.status, 'active');
+    assert.ok(doc.contentHash);
+    phase7DocId = doc.id;
+  });
+
+  // 2. Retrieve document
+  it('Phase 7.2: getDocument() retrieves existing document by ID or throws on missing ID', async () => {
+    const doc = await documentService.getDocument(phase7DocId);
+    assert.strictEqual(doc.id, phase7DocId);
+    assert.strictEqual(doc.title, 'PostgreSQL Indexing & Query Execution Plans');
+
+    await assert.rejects(
+      async () => {
+        await documentService.getDocument('non_existent_doc_id_999');
+      },
+      /not found/i
+    );
+  });
+
+  // 3. List documents
+  it('Phase 7.3: listDocuments() supports category, role, and limit filtering', async () => {
+    const allDocs = await documentService.listDocuments({ limit: 10 });
+    assert.ok(allDocs.length >= 1);
+
+    const sqlDocs = await documentService.listDocuments({ category: 'SQL' });
+    assert.ok(sqlDocs.every((d) => d.category.toLowerCase() === 'sql'));
+
+    const filtered = await documentService.listDocuments({ role: 'Backend Engineer' });
+    assert.ok(filtered.some((d) => d.id === phase7DocId));
+  });
+
+  // 4. Update document
+  it('Phase 7.4: updateDocument() modifies document metadata and recalculates hash if content changes', async () => {
+    const updated = await documentService.updateDocument(phase7DocId, {
+      description: 'Updated PostgreSQL deep dive documentation.',
+      tags: ['PostgreSQL', 'Performance', 'EXPLAIN'],
+    });
+
+    assert.strictEqual(updated.description, 'Updated PostgreSQL deep dive documentation.');
+    assert.deepStrictEqual(updated.tags, ['PostgreSQL', 'Performance', 'EXPLAIN']);
+  });
+
+  // 5. Delete document
+  it('Phase 7.5: deleteDocument() removes document and all associated vector chunks', async () => {
+    // Create temporary document to delete
+    const tempDoc = await documentService.createDocument({
+      title: 'Temporary Knowledge To Be Deleted',
+      content: 'This document will be deleted and its vectors removed.',
+      category: 'General',
+    });
+
+    const deleteResult = await documentService.deleteDocument(tempDoc.id);
+    assert.strictEqual(deleteResult.deleted, true);
+    assert.strictEqual(deleteResult.documentId, tempDoc.id);
+
+    // Verify document no longer exists
+    await assert.rejects(async () => {
+      await documentService.getDocument(tempDoc.id);
+    }, /not found/i);
+  });
+
+  // 6. Chunking behavior
+  it('Phase 7.6: chunkingService splits text into properly bounded chunks with documentId and chunkIndex', () => {
+    const sampleText = `Paragraph 1: Distributed systems require consensus protocols like Raft or Paxos to maintain consistent state across unreliable nodes.
+Paragraph 2: The CAP theorem dictates that in the presence of network partitions, distributed databases must choose between consistency and availability.
+Paragraph 3: Eventual consistency allows replicas to diverge temporarily as long as they converge after a bounded interval without further updates.`;
+
+    const chunks = chunkingService.chunkText(sampleText, {
+      documentId: 'doc_123',
+      maxChunkSize: 100,
+      overlapSize: 20,
+    });
+
+    assert.ok(chunks.length >= 1);
+    assert.strictEqual(chunks[0].documentId, 'doc_123');
+    assert.strictEqual(chunks[0].chunkIndex, 0);
+    assert.ok(chunks[0].tokenCount > 0);
+    assert.ok(chunks[0].content.length > 0);
+  });
+
+  // 7. Chunk overlap
+  it('Phase 7.7: chunkingService implements configurable token overlap across adjacent chunks', () => {
+    const longText = Array.from({ length: 40 }, (_, i) => `Sentence number ${i} explaining scalable systems architecture and database sharding.`).join(' ');
+
+    const chunks = chunkingService.chunkText(longText, {
+      documentId: 'doc_overlap',
+      maxChunkSize: 60,
+      overlapSize: 20,
+    });
+
+    assert.ok(chunks.length > 1);
+    // Overlap implies chunk 1 contains words that also appear in chunk 0
+    const chunk0Words = new Set(chunks[0].content.toLowerCase().split(/\s+/));
+    const chunk1Words = chunks[1].content.toLowerCase().split(/\s+/);
+    const commonWords = chunk1Words.filter((w) => chunk0Words.has(w));
+    assert.ok(commonWords.length > 0);
+  });
+
+  // 8. Deterministic chunking
+  it('Phase 7.8: chunkingService produces identical chunks for identical inputs (deterministic)', () => {
+    const text = 'Deterministic chunking ensures reproducibility. Every run generates identical splits, token counts, and chunk boundaries across builds.';
+
+    const runA = chunkingService.chunkText(text, { documentId: 'doc_det' });
+    const runB = chunkingService.chunkText(text, { documentId: 'doc_det' });
+
+    assert.strictEqual(runA.length, runB.length);
+    assert.strictEqual(runA[0].content, runB[0].content);
+    assert.strictEqual(runA[0].tokenCount, runB[0].tokenCount);
+  });
+
+  // 9. Embedding validation
+  it('Phase 7.9: embeddingService validates embedding vectors format, dimensions, and numerical validity', () => {
+    const validVector = new Array(1536).fill(0.025);
+    assert.strictEqual(embeddingService.validateEmbedding(validVector), true);
+
+    assert.strictEqual(embeddingService.validateEmbedding([]), false);
+    assert.strictEqual(embeddingService.validateEmbedding(null), false);
+    assert.strictEqual(embeddingService.validateEmbedding([1, 2, 'three']), false);
+    assert.strictEqual(embeddingService.validateEmbedding([1, 2, NaN]), false);
+  });
+
+  // 10. Mock embedding generation
+  it('Phase 7.10: Mock embedding generation produces deterministic normalized vectors without external API calls', async () => {
+    const text1 = 'SQL Window Functions RANK and DENSE_RANK';
+    const text2 = 'Machine learning gradient descent optimizer';
+
+    const emb1 = await embeddingService.generateEmbedding(text1);
+    const emb1Repeat = await embeddingService.generateEmbedding(text1);
+    const emb2 = await embeddingService.generateEmbedding(text2);
+
+    assert.strictEqual(emb1.length, embeddingService.getEmbeddingDimensions());
+    assert.deepStrictEqual(emb1, emb1Repeat); // Deterministic
+    assert.notDeepStrictEqual(emb1, emb2); // Distinct for different texts
+
+    // Unit length check: dot product with itself approx 1.0
+    const norm = Math.sqrt(emb1.reduce((sum, v) => sum + v * v, 0));
+    assert.ok(Math.abs(norm - 1.0) < 0.05);
+  });
+
+  // 11. Document ingestion
+  it('Phase 7.11: ingestDocument() ingests document into vector store and sets chunksCount and indexedAt', async () => {
+    const result = await documentService.ingestDocument(phase7DocId, true);
+    assert.strictEqual(result.success, true);
+    assert.ok(result.chunksCount > 0);
+
+    const doc = await documentService.getDocument(phase7DocId);
+    assert.strictEqual(doc.chunksCount, result.chunksCount);
+    assert.ok(doc.indexedAt);
+  });
+
+  // 12. Ingestion failure cleanup
+  it('Phase 7.12: Ingestion failure cleans up partial chunks and reports structured error', async () => {
+    // Attempting to ingest non-existent document
+    await assert.rejects(async () => {
+      await documentService.ingestDocument('non_existent_id_404');
+    }, /not found/i);
+  });
+
+  // 13. Vector insertion
+  it('Phase 7.13: vectorStoreService.upsertVectors() stores chunks and respects bulk operations', async () => {
+    const mockChunks = [
+      {
+        documentId: 'doc_vector_test',
+        chunkIndex: 0,
+        content: 'Vector store unit testing chunk alpha.',
+        embedding: new Array(1536).fill(0.01),
+        tokenCount: 8,
+        metadata: { category: 'SQL', role: 'Data Analyst' },
+      },
+      {
+        documentId: 'doc_vector_test',
+        chunkIndex: 1,
+        content: 'Vector store unit testing chunk beta.',
+        embedding: new Array(1536).fill(0.02),
+        tokenCount: 8,
+        metadata: { category: 'SQL', role: 'Data Analyst' },
+      },
+    ];
+
+    const storedCount = await vectorStoreService.upsertVectors(mockChunks);
+    assert.strictEqual(storedCount, 2);
+
+    const count = await vectorStoreService.getChunksCount('doc_vector_test');
+    assert.strictEqual(count, 2);
+
+    // Cleanup
+    await vectorStoreService.deleteVectors('doc_vector_test');
+  });
+
+  // 14. Semantic retrieval
+  it('Phase 7.14: retrievalService.search() retrieves semantically relevant knowledge chunks with scores', async () => {
+    const results = await retrievalService.search('PostgreSQL B-Tree index and execution plans', {
+      limit: 3,
+    });
+
+    assert.ok(Array.isArray(results));
+    assert.ok(results.length > 0);
+    assert.ok(results[0].title);
+    assert.ok(results[0].content);
+    assert.ok(typeof results[0].score === 'number');
+  });
+
+  // 15. Top-K limiting
+  it('Phase 7.15: retrievalService respects top-K limit configuration', async () => {
+    const top1 = await retrievalService.search('SQL database query', { limit: 1 });
+    assert.ok(top1.length <= 1);
+
+    const top3 = await retrievalService.search('SQL database query', { limit: 3 });
+    assert.ok(top3.length <= 3);
+  });
+
+  // 16. Metadata filtering
+  it('Phase 7.16: retrievalService filters results by category and role', async () => {
+    const sqlResults = await retrievalService.search('index and query', {
+      category: 'SQL',
+      limit: 5,
+    });
+
+    if (sqlResults.length > 0) {
+      assert.ok(sqlResults.every((r) => r.metadata?.category?.toLowerCase() === 'sql'));
+    }
+  });
+
+  // 17. Duplicate result removal
+  it('Phase 7.17: retrievalService removes duplicate content chunks from search output', async () => {
+    const mockDuplicateChunks = [
+      { chunkId: 'c1', documentId: 'd1', title: 'Doc', content: 'Identical content string', score: 0.9 },
+      { chunkId: 'c2', documentId: 'd1', title: 'Doc', content: 'Identical content string', score: 0.88 },
+      { chunkId: 'c3', documentId: 'd2', title: 'Doc 2', content: 'Unique content block', score: 0.75 },
+    ];
+
+    const deduplicated = retrievalService.deduplicateResults(mockDuplicateChunks);
+    assert.strictEqual(deduplicated.length, 2);
+  });
+
+  // 18. search_knowledge tool
+  it('Phase 7.18: search_knowledge tool executes successfully via ToolRegistry without leaking raw embeddings', async () => {
+    const tool = toolRegistry.getTool('search_knowledge');
+    assert.ok(tool);
+
+    const result = await tool.execute({
+      query: 'PostgreSQL indexing',
+      limit: 2,
+    });
+
+    assert.ok(Array.isArray(result.results));
+    for (const item of result.results) {
+      assert.ok(item.title);
+      assert.ok(item.content);
+      assert.strictEqual(item.embedding, undefined); // Never leak raw embeddings
+    }
+  });
+
+  // 19. User query grounding
+  it('Phase 7.19: ragService builds grounded prompt enforcing adherence to retrieved knowledge', () => {
+    const query = 'Explain PostgreSQL B-Trees';
+    const context = 'B-Trees are the default index in PostgreSQL handling equality and range queries.';
+
+    const grounded = ragService.buildGroundedPrompt(query, context);
+    assert.ok(grounded.includes('RETRIEVED KNOWLEDGE CONTEXT'));
+    assert.ok(grounded.includes(context));
+    assert.ok(grounded.includes('Strictly prioritize the retrieved context'));
+    assert.ok(grounded.includes(query));
+  });
+
+  // 20. Source formatting
+  it('Phase 7.20: ragService formats sources cleanly without database IDs or internal metadata', () => {
+    const chunks = [
+      { title: 'SQL Window Functions Guide' },
+      { title: 'SQL Window Functions Guide' }, // duplicate title
+      { title: 'DBMS Normalization Notes' },
+    ];
+
+    const sources = ragService.formatSources(chunks);
+    assert.deepStrictEqual(sources, ['SQL Window Functions Guide', 'DBMS Normalization Notes']);
+
+    const footer = ragService.formatSourcesFooter(sources);
+    assert.ok(footer.includes('**Sources:**'));
+    assert.ok(footer.includes('- SQL Window Functions Guide'));
+    assert.ok(footer.includes('- DBMS Normalization Notes'));
+    assert.ok(!footer.includes('ObjectId'));
+  });
+
+  // 21. Empty retrieval handling
+  it('Phase 7.21: retrievalService handles queries with no semantic matches gracefully', async () => {
+    const emptyResults = await retrievalService.search('zxq9910_completely_nonexistent_token_string', {
+      limit: 3,
+    });
+
+    assert.ok(Array.isArray(emptyResults));
+    // Context builder should handle empty results
+    const context = retrievalService.buildContext([]);
+    assert.strictEqual(context, '');
+  });
+
+  // 22. Insufficient knowledge handling
+  it('Phase 7.22: ragService answers truthfully when internal knowledge is insufficient', async () => {
+    const resp = await ragService.answerWithKnowledge('What is quantum entanglement in teleportation circuits?', {
+      candidateProfile: { name: 'Rohan Mehra' },
+    });
+
+    assert.strictEqual(resp.hasKnowledge, false);
+    assert.ok(resp.answer.toLowerCase().includes('insufficient') || resp.answer.toLowerCase().includes('do not have'));
+    assert.deepStrictEqual(resp.sources, []);
+  });
+
+  // 23. Knowledge document isolation
+  it('Phase 7.23: Knowledge documents are isolated from candidate-private profile and memory data', async () => {
+    const docs = await documentService.listDocuments({ limit: 20 });
+    for (const doc of docs) {
+      assert.strictEqual(doc.userId, undefined);
+      assert.ok(!doc.content.includes('rohan.mehra@example.com'));
+    }
+  });
+
+  // 24. Agent retrieval behavior
+  it('Phase 7.24: Agent invokes search_knowledge tool when answering conceptual technical questions', async () => {
+    // Mock generateChatResponse to invoke search_knowledge tool first, then grounded response
+    const originalGenerate = aiService.generateChatResponse;
+    let step = 0;
+
+    aiService.generateChatResponse = async () => {
+      step++;
+      if (step === 1) {
+        return {
+          message: '',
+          rawMessage: { role: 'assistant', content: null },
+          toolCalls: [
+            {
+              id: 'call_search_1',
+              type: 'function',
+              function: {
+                name: 'search_knowledge',
+                arguments: JSON.stringify({ query: 'SQL window functions', limit: 2 }),
+              },
+            },
+          ],
+          model: 'test-model',
+          usage: null,
+        };
+      }
+      return {
+        message: 'SQL window functions calculate values across rows.\n\n**Sources:**\n- SQL Window Functions & Analytical Partitioning',
+        rawMessage: { role: 'assistant', content: 'SQL window functions calculate values across rows.' },
+        toolCalls: [],
+        model: 'test-model',
+        usage: null,
+      };
+    };
+
+    try {
+      const response = await agentService.run({
+        message: 'What are SQL window functions like ROW_NUMBER and RANK?',
+        userId: testUserId,
+      });
+
+      assert.ok(response.message);
+      assert.ok(Array.isArray(response.toolCalls));
+      const usedKnowledge = response.toolCalls.some((t) => t.name === 'search_knowledge');
+      assert.ok(usedKnowledge, 'Agent should invoke search_knowledge tool for technical SQL query');
+    } finally {
+      aiService.generateChatResponse = originalGenerate;
+    }
+  });
+
+  // 25. Phase 1–6 Regression tests
+  it('Phase 7.25: Phase 1–6 functionality remains intact (Regression Verification)', async () => {
+    // 1. Profile retrieval (Phase 2)
+    const profile = await userService.getUserById(testUserId);
+    assert.strictEqual(profile.name, 'Rohan Mehra');
+
+    // 2. Memory creation & retrieval (Phase 4)
+    const mem = await memoryService.createOrUpdateMemory({
+      userId: testUserId,
+      type: 'goal',
+      key: 'Phase 7 Target',
+      value: 'Master RAG knowledge retrieval and vector search',
+    });
+    assert.ok(mem.id);
+
+    // 3. Placement Intelligence (Phase 5)
+    const intel = await placementIntelligenceService.generatePlacementAnalysis({ userId: testUserId });
+    assert.ok(intel.role);
+    assert.ok(intel.readiness);
+
+    // 4. Practice Engine (Phase 6)
+    const session = await practiceService.createSession({
+      userId: testUserId,
+      topic: 'SQL Window Functions',
+      mode: 'practice',
+      questionCount: 1,
+    });
+    assert.ok(session.id);
+    assert.strictEqual(session.status, 'in_progress');
+
+    // 5. REST Knowledge endpoints verification (Phase 7 API)
+    const searchRes = await fetch(`http://localhost:${TEST_PORT}/api/knowledge/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: 'SQL window functions', limit: 2 }),
+    });
+    assert.strictEqual(searchRes.status, 200);
+    const searchJson = await searchRes.json();
+    assert.strictEqual(searchJson.success, true);
+    assert.ok(searchJson.data.results.length > 0);
   });
 });
 

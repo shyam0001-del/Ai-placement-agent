@@ -18,6 +18,10 @@ export const config = {
     model: process.env.OPENAI_MODEL || '',
     baseURL: process.env.OPENAI_BASE_URL || undefined,
   },
+  embedding: {
+    provider: process.env.EMBEDDING_PROVIDER || 'openai',
+    model: process.env.EMBEDDING_MODEL || 'text-embedding-3-small',
+  },
   mongodbUri: process.env.MONGODB_URI || '',
   nodeEnv: process.env.NODE_ENV || 'development',
 };

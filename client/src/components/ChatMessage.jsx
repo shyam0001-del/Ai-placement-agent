@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Bot, User, Copy, Check, AlertCircle, Sparkles } from 'lucide-react';
+import { Bot, User, Copy, Check, AlertCircle, Sparkles, BookOpen } from 'lucide-react';
 
 function getFriendlyToolName(name) {
   switch (name) {
@@ -11,9 +11,53 @@ function getFriendlyToolName(name) {
       return 'Analyzed preparation progress';
     case 'update_user_progress':
       return 'Updated study progress';
+    case 'search_knowledge':
+      return 'Retrieved placement knowledge';
+    case 'get_placement_readiness':
+      return 'Analyzed placement readiness';
+    case 'get_role_requirements':
+      return 'Retrieved role requirements';
+    case 'start_practice_session':
+      return 'Started practice session';
+    case 'submit_practice_answer':
+      return 'Evaluated practice answer';
+    case 'get_practice_history':
+      return 'Fetched practice history';
+    case 'get_weak_practice_topics':
+      return 'Analyzed weak practice areas';
     default:
       return 'Consulted preparation co-pilot tool';
   }
+}
+
+/**
+ * Helper to extract unique source titles from search_knowledge tool calls
+ */
+function extractKnowledgeSources(toolCalls, content = '') {
+  const sources = new Set();
+
+  // 1. From tool calls
+  for (const t of toolCalls) {
+    if (t.name === 'search_knowledge' && Array.isArray(t.result?.results)) {
+      for (const item of t.result.results) {
+        if (item.title) sources.add(item.title);
+      }
+    }
+  }
+
+  // 2. From markdown text if formatted as **Sources:**
+  if (content && typeof content === 'string') {
+    const sourcesMatch = content.match(/\*\*Sources:\*\*([\s\S]*?)(?:\n\n|$)/i);
+    if (sourcesMatch && sourcesMatch[1]) {
+      const lines = sourcesMatch[1].split('\n');
+      for (const line of lines) {
+        const clean = line.replace(/^[-*•\d.]\s*/, '').replace(/\[|\]/g, '').trim();
+        if (clean) sources.add(clean);
+      }
+    }
+  }
+
+  return Array.from(sources);
 }
 
 export default function ChatMessage({ message }) {
@@ -21,6 +65,8 @@ export default function ChatMessage({ message }) {
   const isError = message.isError;
   const toolCalls = Array.isArray(message.toolCalls) ? message.toolCalls : [];
   const [copied, setCopied] = useState(false);
+
+  const sources = !isUser ? extractKnowledgeSources(toolCalls, message.content) : [];
 
   const handleCopy = () => {
     navigator.clipboard.writeText(message.content);
@@ -92,7 +138,7 @@ export default function ChatMessage({ message }) {
             </button>
           </div>
 
-          {/* Optional Tool Activity Badges (Section 14) */}
+          {/* Optional Tool Activity Badges */}
           {toolCalls.length > 0 && (
             <div className="flex flex-wrap gap-1.5 my-2">
               {toolCalls.map((t, idx) => (
@@ -100,7 +146,11 @@ export default function ChatMessage({ message }) {
                   key={idx}
                   className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] bg-slate-800/80 border border-slate-700 text-cyan-300 font-medium"
                 >
-                  <Sparkles className="w-3 h-3 text-cyan-400" />
+                  {t.name === 'search_knowledge' ? (
+                    <BookOpen className="w-3 h-3 text-cyan-400" />
+                  ) : (
+                    <Sparkles className="w-3 h-3 text-cyan-400" />
+                  )}
                   <span>{getFriendlyToolName(t.name)}</span>
                 </span>
               ))}
@@ -117,6 +167,26 @@ export default function ChatMessage({ message }) {
               </ReactMarkdown>
             )}
           </div>
+
+          {/* Subtle RAG Sources Badges */}
+          {sources.length > 0 && (
+            <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex flex-col gap-1.5">
+              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                <BookOpen className="w-3 h-3 text-cyan-400" />
+                <span>Sources</span>
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {sources.map((s, idx) => (
+                  <span
+                    key={idx}
+                    className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-medium bg-slate-800/90 text-cyan-300 border border-slate-700 hover:border-cyan-500/40 transition"
+                  >
+                    [{s}]
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

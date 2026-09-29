@@ -1,12 +1,20 @@
 import app from './app.js';
 import { config, validateAiConfig } from './config/env.js';
-import { connectDatabase, disconnectDatabase } from './config/db.js';
+import { connectDatabase, disconnectDatabase, isDatabaseConnected } from './config/db.js';
+import { seedKnowledgeBase } from './services/rag/seedData.js';
 
 const PORT = config.port;
 
 async function bootstrap() {
   // Connect to MongoDB with graceful degradation
   await connectDatabase();
+
+  // Initialize seed knowledge base if database is connected
+  if (isDatabaseConnected()) {
+    seedKnowledgeBase().catch((err) => {
+      console.warn('⚠️  Initial knowledge base seeding warning:', err.message);
+    });
+  }
 
   const server = app.listen(PORT, () => {
     console.log(`===============================================`);

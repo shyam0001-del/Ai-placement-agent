@@ -400,5 +400,123 @@ export async function fetchPracticeWeakTopics(userId) {
   return data.data || [];
 }
 
+/**
+ * ========================================================
+ * Knowledge Engine & RAG API Methods (Phase 7)
+ * ========================================================
+ */
+
+/**
+ * Fetch knowledge documents with optional filters
+ * @param {Object} [filter]
+ */
+export async function fetchKnowledgeDocuments(filter = {}) {
+  const query = new URLSearchParams();
+  if (filter.category && filter.category !== 'all') query.append('category', filter.category);
+  if (filter.role && filter.role !== 'all') query.append('role', filter.role);
+  if (filter.status) query.append('status', filter.status);
+  if (filter.limit) query.append('limit', filter.limit);
+
+  const url = `${API_BASE}/knowledge/documents${query.toString() ? `?${query.toString()}` : ''}`;
+  const response = await fetch(url);
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.success) {
+    const err = new Error(data?.error?.message || 'Failed to fetch knowledge documents');
+    err.code = data?.error?.code || 'KNOWLEDGE_FETCH_ERROR';
+    throw err;
+  }
+  return data.data || [];
+}
+
+/**
+ * Fetch single knowledge document
+ * @param {string} documentId
+ */
+export async function fetchKnowledgeDocument(documentId) {
+  const response = await fetch(`${API_BASE}/knowledge/documents/${encodeURIComponent(documentId)}`);
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.success) {
+    const err = new Error(data?.error?.message || 'Failed to fetch document');
+    err.code = data?.error?.code || 'DOCUMENT_FETCH_ERROR';
+    throw err;
+  }
+  return data.data;
+}
+
+/**
+ * Create a new knowledge document
+ * @param {Object} docData
+ */
+export async function createKnowledgeDocument(docData) {
+  const response = await fetch(`${API_BASE}/knowledge/documents`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(docData),
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.success) {
+    const err = new Error(data?.error?.message || 'Failed to create knowledge document');
+    err.code = data?.error?.code || 'DOCUMENT_CREATE_ERROR';
+    throw err;
+  }
+  return data.data;
+}
+
+/**
+ * Ingest / Reindex a knowledge document
+ * @param {string} documentId
+ * @param {boolean} [force=false]
+ */
+export async function ingestKnowledgeDocument(documentId, force = false) {
+  const response = await fetch(`${API_BASE}/knowledge/documents/${encodeURIComponent(documentId)}/ingest`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ force }),
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.success) {
+    const err = new Error(data?.error?.message || 'Failed to ingest knowledge document');
+    err.code = data?.error?.code || 'DOCUMENT_INGEST_ERROR';
+    throw err;
+  }
+  return data.data;
+}
+
+/**
+ * Delete a knowledge document and its vector chunks
+ * @param {string} documentId
+ */
+export async function deleteKnowledgeDocument(documentId) {
+  const response = await fetch(`${API_BASE}/knowledge/documents/${encodeURIComponent(documentId)}`, {
+    method: 'DELETE',
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.success) {
+    const err = new Error(data?.error?.message || 'Failed to delete knowledge document');
+    err.code = data?.error?.code || 'DOCUMENT_DELETE_ERROR';
+    throw err;
+  }
+  return data.data;
+}
+
+/**
+ * Test semantic search against the knowledge vector store
+ * @param {Object} searchParams
+ */
+export async function searchKnowledgeApi(searchParams) {
+  const response = await fetch(`${API_BASE}/knowledge/search`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(searchParams),
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.success) {
+    const err = new Error(data?.error?.message || 'Knowledge search failed');
+    err.code = data?.error?.code || 'KNOWLEDGE_SEARCH_ERROR';
+    throw err;
+  }
+  return data.data;
+}
+
 
 

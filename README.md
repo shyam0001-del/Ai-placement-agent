@@ -244,13 +244,60 @@ The Practice Engine elevates the placement agent from analysis into active inter
 14. `complete_practice_session`
 15. `get_practice_history`
 16. `get_weak_practice_topics`
+17. `search_knowledge`
 
 ### Important Disclaimer
-> **Notice:** Practice scores are preparation feedback, not hiring predictions. Evaluator scores and recommendations are designed strictly to guide active self-study and mock interview readiness.
+> **Notice:** Practice scores and internal knowledge references are preparation feedback, not hiring predictions. Evaluator scores and recommendations are designed strictly to guide active self-study and mock interview readiness.
 
 ---
 
-## 8. Multi-Phase Roadmap
+## 8. Phase 7 — RAG / Knowledge Engine Architecture
+
+Phase 7 introduces an internal, controlled Retrieval-Augmented Generation (RAG) knowledge engine:
+
+```text
+Technical Documents
+       ↓
+Document Ingestion & Validation
+       ↓
+Text Normalization & SHA-256 contentHash Check
+       ↓
+Deterministic Chunking (with token overlap & boundary preservation)
+       ↓
+Embedding Generation (OpenAI text-embedding-3-small or Deterministic Mock)
+       ↓
+Vector Storage (MongoDB KnowledgeChunk model or In-Memory fallback)
+       ↓
+Semantic Vector Retrieval + Metadata Filtering (Role, Category, Topic)
+       ↓
+Agent Tool: search_knowledge
+       ↓
+Grounded LLM Response with Clean Source Attribution
+```
+
+### Knowledge Models
+- **`KnowledgeDocument` (`knowledgeDocument.model.js`):** Stores title, description, raw content, SHA-256 `contentHash`, source, category (e.g. SQL, DBMS, DSA, React, ML, System Design), role, tags, contentType (`concept`, `guide`, `interview`, `notes`), status (`active`, `archived`), and `chunksCount`.
+- **`KnowledgeChunk` (`knowledgeChunk.model.js`):** Stores chunked text content, `chunkIndex`, `documentId`, `embedding` vector (with `select: false` security guardrail to prevent raw numerical exposure), and metadata.
+
+### Deterministic Chunking & Embeddings
+- **`ChunkingService` (`chunking.service.js`):** Splits text into configurable chunks (default ~600 tokens) with configurable token overlap (default ~80 tokens) while preserving paragraph and sentence boundaries.
+- **`EmbeddingService` (`embedding.service.js`):** Provides configurable embeddings (`EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`). When offline or without an API key, utilizes a deterministic L2 unit-normalized term-frequency projection across 64 dimensions with stop-word filtering.
+- **`VectorStoreService` (`vectorStore.service.js`):** Implements MongoDB chunk storage with cosine similarity search and in-memory test fallback, avoiding external third-party vector databases.
+- **`DocumentService` (`document.service.js`):** Full lifecycle management with change detection. If `contentHash` is identical during re-ingestion, redundant embedding generation is skipped.
+- **`RagService` (`rag.service.js`):** Generates grounded prompts, validates knowledge sufficiency (scoring threshold), and formats clean source citations without exposing internal IDs.
+
+### REST Endpoints (Development)
+- `POST /api/knowledge/documents` — Create a knowledge document
+- `GET /api/knowledge/documents` — List documents with category and role filters
+- `GET /api/knowledge/documents/:documentId` — Get document details
+- `PUT /api/knowledge/documents/:documentId` — Update document metadata or content
+- `POST /api/knowledge/documents/:documentId/ingest` — Ingest/re-index document into vector store
+- `DELETE /api/knowledge/documents/:documentId` — Remove document and all associated chunks
+- `POST /api/knowledge/search` — Direct semantic retrieval query test
+
+---
+
+## 9. Multi-Phase Roadmap
 
 | Phase | Milestone | Description | Status |
 |---|---|---|---|
@@ -260,18 +307,18 @@ The Practice Engine elevates the placement agent from analysis into active inter
 | **Phase 4** | **Structured Memory** | Short-term context pruning + long-term explicit student memory | **COMPLETED** |
 | **Phase 5** | **Placement Intelligence** | Deterministic gap analysis, role benchmarking, readiness indicator | **COMPLETED** |
 | **Phase 6** | **Practice & Interview Engine** | Mock interview sessions, semantic answer evaluation, adaptive difficulty | **COMPLETED** |
-| **Phase 7** | **RAG Pipeline** | Resume & notes ingestion, vector embeddings, grounded retrieval | *Upcoming* |
+| **Phase 7** | **RAG / Knowledge Engine** | Controlled internal technical docs, chunking, embeddings, vector retrieval, agent tool | **COMPLETED** |
 | **Phase 8** | **Live Web Tools** | Current company tech stacks, hiring trends, job post analysis | *Upcoming* |
 | **Phase 9** | **Evaluation & Quality** | Automated test benchmark, token tracking, agent guardrails | *Upcoming* |
 
 ---
 
-## 9. Verification & Testing
+## 10. Verification & Testing
 
 Run the full end-to-end verification suite across all phases:
 
 ```bash
-# Run server test suite (78/78 automated tests across Phases 1-6)
+# Run server test suite (103/103 automated tests across Phases 1-7)
 npm run test:server
 
 # Run client linter (Oxlint)
@@ -280,5 +327,6 @@ npm run lint:client
 # Run client production build (Vite)
 npm run build:client
 ```
+
 
 

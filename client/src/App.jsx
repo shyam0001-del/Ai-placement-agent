@@ -6,13 +6,14 @@ import ChatInput from './components/ChatInput';
 import ProfileView from './components/ProfileView';
 import PlacementIntelligenceView from './components/PlacementIntelligenceView';
 import PracticeView from './components/PracticeView';
+import KnowledgeView from './components/KnowledgeView';
 import { useChat } from './hooks/useChat';
 import { useProfile } from './hooks/useProfile';
 
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [inputValue, setInputValue] = useState('');
-  const [activeTab, setActiveTab] = useState('chat'); // 'chat' | 'profile' | 'placement' | 'practice'
+  const [activeTab, setActiveTab] = useState('chat'); // 'chat' | 'profile' | 'placement' | 'practice' | 'knowledge'
 
   const {
     profile,
@@ -118,6 +119,12 @@ export default function App() {
             activeProfile={profile}
             onStartChatWithPrompt={handleSelectPrompt}
             onNavigateToProfile={() => setActiveTab('profile')}
+          />
+        )}
+
+        {activeTab === 'knowledge' && (
+          <KnowledgeView
+            onStartChatWithPrompt={handleSelectPrompt}
           />
         )}
       </main>
